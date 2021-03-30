@@ -1,1 +1,2 @@
 # TensionMap
+Measuring properties of cells in vivo is a challenging problem in cellular mechanics, paving the way for vision-based approaches. We introduce TensionMap, a Python library for end-to-end estimation of tension in epithelial cell images. TensionMap features a novel pipeline for cell topology deduction, as well as an implementation of the VMSI algorithm for tension inference, which we then evaluate on synthetically generated data.  
