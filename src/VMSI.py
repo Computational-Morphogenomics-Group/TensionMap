@@ -442,7 +442,7 @@ def get_actual(seg, dtr):
     
     return actual_model
     
-def evaluate(model, seg=seg, dtr=dtr):
+def evaluate(model, seg, dtr):
     actual_model = get_actual(seg, dtr)
     
     predicted = model.tension
