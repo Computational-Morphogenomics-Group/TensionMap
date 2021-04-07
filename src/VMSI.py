@@ -398,8 +398,8 @@ class VMSI():
                         img = cv2.circle(img, (int(point[1]), int(point[0])), 2, (1, (1-T), (1-T)), -1)
 
                     # plot the arc endpoints
-                    img = cv2.circle(img, (int(arc[0][1]), int(arc[0][0])), 5, (0, 0, 0), -1)
-                    img = cv2.circle(img, (int(arc[-1][1]), int(arc[-1][0])), 5, (0, 0, 0), -1)
+                    img = cv2.circle(img, (int(arc[0][1]), int(arc[0][0])), 3, (0, 0, 0), -1)
+                    img = cv2.circle(img, (int(arc[-1][1]), int(arc[-1][0])), 3, (0, 0, 0), -1)
                 except:
                     print(T)
 
