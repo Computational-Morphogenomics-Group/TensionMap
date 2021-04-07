@@ -409,7 +409,7 @@ class VMSI():
         
         return img
         
-def get_actual(model, seg, dtr):
+def get_actual(model, seg, dtr, generating_points):
     actual_model = VMSI(cell_pairs = seg.pairs(), edges = seg.edges(), num_cells = len(seg.cells[0]), 
              cells = seg.cells[0], edge_cells = seg.get_edge_cells(), barrycenters = seg.barrycenters[0], height=256, width=256)
     q, z, p = actual_model.extract_values(model.initialize_points())
@@ -442,8 +442,8 @@ def get_actual(model, seg, dtr):
     
     return actual_model
     
-def evaluate(model, seg, dtr):
-    actual_model = get_actual(model, seg, dtr)
+def evaluate(model, seg, dtr, generating_points):
+    actual_model = get_actual(model, seg, dtr, generating_points)
     
     predicted = model.tension
     actual = actual_model.tension
