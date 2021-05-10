@@ -5,3 +5,5 @@ The three main features of TensionMap are:
 - Synthetic data generator
 - Segmentation and cell graph inference
 - VMSI tension inference
+
+As a rule of thumb, if the tension inference takes too much time (or fails to converge), try to decrease the size of your input image.
