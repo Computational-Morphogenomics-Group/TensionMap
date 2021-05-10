@@ -198,15 +198,18 @@ class VMSI():
             E = 0
             
             E1 = abs(ratio_constraint(theta))
-            E += 1000000*E1
+            E += E1
             
             if len([True for i in range(len(p)) if p[i] < 0]):
                 return np.inf
             
+            P = np.array([[abs(p1-p1) for p1 in p] for p2 in p])
+            E /= np.linalg.norm(P, 'fro')
+            
             for (alpha, beta) in self.cell_pairs:
                 # for both vertices at the extremities
                 for i in range(2):
-                    E += (t(alpha, beta, q, p, i) @ self.tangents[alpha][beta][i])**2
+                    E += 10e5*(t(alpha, beta, q, p, i) @ self.tangents[alpha][beta][i])**2
             return E
 
         def fit_circle(edge):
@@ -355,7 +358,7 @@ class VMSI():
                 tensions_normalized[beta][alpha] = -1 * tensions_normalized[alpha][beta]
         return tensions_normalized
             
-    def CAP(self, img, q, z, p):
+    def CAP(self, img, q, z, p, linewidth=2, endpoint_size=5):
         
         """
         
@@ -395,11 +398,11 @@ class VMSI():
                     # plot the continuous path between those two points
                     for point in arc:
                         # color will be determined by the tension
-                        img = cv2.circle(img, (int(point[1]), int(point[0])), 2, (1, (1-T), (1-T)), -1)
+                        img = cv2.circle(img, (int(point[1]), int(point[0])), linewidth, (1, (1-T), (1-T)), -1)
 
                     # plot the arc endpoints
-                    img = cv2.circle(img, (int(arc[0][1]), int(arc[0][0])), 3, (0, 0, 0), -1)
-                    img = cv2.circle(img, (int(arc[-1][1]), int(arc[-1][0])), 3, (0, 0, 0), -1)
+                    img = cv2.circle(img, (int(arc[0][1]), int(arc[0][0])), endpoint_size, (0, 0, 0), -1)
+                    img = cv2.circle(img, (int(arc[-1][1]), int(arc[-1][0])), endpoint_size, (0, 0, 0), -1)
                 except:
                     print(T)
 
