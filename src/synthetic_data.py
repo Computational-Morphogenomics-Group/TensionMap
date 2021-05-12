@@ -110,6 +110,8 @@ class DistanceTransform():
         self.CMs = np.array([[0, 0] for _ in range(len(self.points))])
         self.points_in_cell = [0 for _ in range(len(self.points))]
         
+        self.pressure_mask = None
+        
     def normalize(self, x):
         max_ = np.max(x)
         min_ = np.min(x)
@@ -120,16 +122,23 @@ class DistanceTransform():
         return image with the intensity of r = (x,y) corresponding to min_{i} p_i d_i^2(r) where i corresponds 
         to the index of the point in points. Also computes the center of mass for each cell. 
         """
+        
         transform = np.zeros((self.max_x, self.max_y)).astype('float32')
+        pressures = np.zeros((self.max_x, self.max_y)).astype('float32')
+        
         for i, r in enumerate(self.grid):
             closest_cell = np.argmin(self.distances[:, i])
             transform[r[0], r[1]] = self.distances[:, i][closest_cell]
+            
+            pressures[r[0], r[1]] = self.points[closest_cell].p
+            
             # update center of mass of corresponding cell
             self.CMs[closest_cell] += r
             self.points_in_cell[closest_cell] += 1
         
         self.CMs = [self.CMs[i]/self.points_in_cell[i] for i in range(len(self.points))]
         self.transform = self.normalize(transform).T
+        self.pressure_mask = self.normalize(pressures).T
     
     def visualize_transform(self):
         res_rgb = cv2.cvtColor(self.transform, cv2.COLOR_GRAY2RGB)
