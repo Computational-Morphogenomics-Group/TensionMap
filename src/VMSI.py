@@ -188,7 +188,7 @@ class VMSI():
                 for i in range(2):
                     avg_t_norm += np.linalg.norm(t(alpha, beta, q, p, i))
             
-            ratio = avg_t_norm / 2*avg_p_differential
+            ratio = avg_t_norm / (2*avg_p_differential)
             # R_avg is precomputed outside of this function 
             return ratio - R_avg
         
@@ -202,9 +202,6 @@ class VMSI():
             
             if len([True for i in range(len(p)) if p[i] < 0]):
                 return np.inf
-            
-            P = np.array([[abs(p1-p1) for p1 in p] for p2 in p])
-            E /= np.linalg.norm(P, 'fro')
             
             for (alpha, beta) in self.cell_pairs:
                 # for both vertices at the extremities
