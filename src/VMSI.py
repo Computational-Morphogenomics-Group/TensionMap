@@ -2,6 +2,7 @@ import cv2
 import glob
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.optimize
 from cellpose import models
 from cellpose import utils
 from cellpose import plot
@@ -9,37 +10,163 @@ from scipy.ndimage import generic_filter
 import itertools
 from tqdm import tqdm
 from scipy.optimize import minimize, leastsq
+import pandas as pd
+
 
 class VMSI():
     
-    def __init__(self, cell_pairs, edges, num_cells, cells, barrycenters, edge_cells, width=500, height=500):
-        self.cell_pairs = cell_pairs
+    def __init__(self, vertices, cells, edges, width=500, height=500):
+        self.vertices = vertices
+        self.cells = cells
         self.edges = edges
-        self.num_edges = len(edges)
-        self.num_cells = num_cells
         self.width = width
         self.height = height
-        self.barrycenters = barrycenters
-        self.cells = cells
-        self.tension = {alpha: {beta: None for beta in self.cells} for alpha in self.cells}
-        self.edge_cells = edge_cells
-        
-        # remove edges if they don't have at least 3 points
-        for (alpha, beta) in self.cell_pairs:
-            if len(self.edges[alpha][beta]) < 3: 
-                self.cell_pairs.remove((alpha, beta))
-                self.edges[alpha][beta] = None
-        
-        # init vertices
-        self.vertices = {alpha: {beta: None for beta in self.cells} for alpha in self.cells}
-        for (alpha, beta) in self.cell_pairs:
-            self.vertices[alpha][beta] = self.get_vertices(alpha, beta)
-        
-        # init tangents at vertices
-        self.tangents = {alpha: {beta: None for beta in self.cells} for alpha in self.cells}
-        for (alpha, beta) in self.cell_pairs:
-            self.tangents[alpha][beta] = self.get_tangents(alpha, beta)
-    
+
+        # Mark fourfold vertices
+        self.vertices['fourfold'] = [(np.shape(nverts)[0] != 3) for nverts in self.vertices['nverts']]
+
+
+    def fit_circle(self):
+        """
+
+        fit circle to each edge
+        if edge is too flat, fit line instead
+
+        """
+        for i in range(len(self.edges)):
+            r1 = np.array(self.vertices.loc[self.edges.loc[i]['verts'][0]-1].coords)
+            r2 = np.array(self.vertices.loc[self.edges.loc[i]['verts'][1]-1].coords)
+
+            edge_pixels = [np.unravel_index(pixel, (self.width, self.height)) for pixel in self.edges.loc[i]['pixels']]
+
+            nB = np.matmul(np.array([[0, 1], [-1, 0]]), r1 - r2)
+            D = np.sqrt(np.sum(np.power(nB, 2)))
+            nB = np.divide(nB, D)
+            x0 = 0.5*(r1 + r2)
+
+            delta = edge_pixels - x0
+            IP = (delta[:,0] * nB[0]) + (delta[:,1] * nB[1])
+            L0 = D/2
+
+            A = 2*np.sum(np.power(IP, 2))
+            B = np.sum((np.sum(np.power(delta, 2), axis=1) - np.power(L0, 2)) * IP)
+            y0 = np.divide(B, A)
+
+            def energyfunc(x):
+                return np.mean(np.power(np.sqrt(np.sum(np.power(delta-(x*nB), 2), axis=1)) - np.sqrt(np.power(x, 2) + np.power(L0, 2)), 2))
+
+            if not np.isnan(y0):
+                res = scipy.optimize.minimize(energyfunc, y0)
+            else:
+                res = scipy.optimize.minimize(energyfunc, 0)
+            y = res.x
+            E = res.fun
+
+            linedistance = np.mean(np.power(IP, 2))
+            if (E < linedistance & len(edge_pixels) > 3):
+                self.edges.loc[i]['radius'] = np.sqrt(np.power(y, 2) + np.power(L0, 2))
+                self.edges.loc[i]['rho'] = x0 + (y * nB)
+                self.edges.loc[i]['fitenergy'] = E
+            else:
+                self.edges.loc[i]['radius'] = np.Inf
+                self.edges.loc[i]['rho'] = np.array([np.Inf, np.Inf])
+                self.edges.loc[i]['fitenergy'] = linedistance
+
+        return
+
+    def remove_fourfold(self):
+        """
+
+        recursively removes fourfold (or greater) vertices by moving vertex apart in direction of greatest variance
+
+        """
+
+        for v in range(len(self.vertices)):
+            if (np.shape(self.vertices['nverts'][v])[0] > 3  and not (1 in self.vertices['ncells'][v])):
+                while (np.shape(self.vertices['nverts'][v])[0] > 3):
+                    num_v = len(self.vertices)
+                    num_e = len(self.edges)
+
+                    nverts = self.vertices['nverts'][v]
+                    nedges = self.vertices['edges'][v]
+                    ncells = self.vertices['ncells'][v]
+
+                    R = self.vertices['coords'][nverts]
+                    rV = self.vertices['coords'][v]
+
+                    R = R - np.mean(R, axis=1)
+                    I = R * R.T
+
+                    W, V = np.linalg.eig(I)
+                    direction = V[:,np.argmax(W)]
+
+                    rV1 = rV + (direction/2)
+                    rV2 = rV - (direction/2)
+
+                    # set positive neighbour vertices to the 2 vertices closest to the direction of vertex movement
+                    # all other neighbour vertices remain with negative vertex
+                    indices = np.argsort(np.dot(R, direction))[-2:]
+                    pos_verts = np.zeros_like(indices)
+                    pos_verts[indices] = 1
+                    neg_verts = 1 - pos_verts
+
+                    # change vertex with current index to negative vertex
+                    self.vertices['coords'][v] = rV2
+                    self.vertices['nverts'][v] = np.array([nverts[neg_verts.astype('bool')], num_v+1])
+                    self.vertices['fourfold'][v] = (np.shape(self.vertices['nverts'][v])[0] > 3)
+
+                    neg_cells = ncells[[(np.isin(self.vertices['nverts'][v], self.cells['nverts'][cell]) == 2) for cell in ncells]]
+
+                    # add positive vertex
+                    self.vertices['coords'][num_v+1] = rV1
+                    self.vertices['nverts'][num_v+1] = np.array([nverts[pos_verts.astype('bool')], v])
+                    self.vertices['fourfold'][num_v+1] = 0
+
+                    pos_cell = ncells[[(np.isin(self.vertices['nverts'][num_v+1], self.cells['nverts'][cell]) == 2) for cell in ncells]]
+
+                    # update new positive vertex index for neighbour vertices
+                    for vert in nverts[pos_verts.astype('bool')]:
+                        self.vertices['nverts'][vert][self.vertices['nverts'][vert] == v] = num_v+1
+
+                    joint_cells = ncells[not (np.isin(ncells, np.array([pos_cell, neg_cells])))]
+
+                    self.vertices['ncells'][v] = np.array([joint_cells, neg_cells])
+                    self.vertices['ncells'][num_v+1] = np.array([joint_cells, pos_cell])
+
+                    # update current edges
+                    neg_edges = nedges[neg_verts.astype('bool')]
+                    pos_edges = nedges[pos_verts.astype('bool')]
+
+                    self.edges['verts'][pos_edges[0]] = num_v+1
+                    self.edges['verts'][pos_edges[1]] = num_v+1
+
+                    # create new edge between new vertices
+                    # edge is only one pixel long so no need to add pixels
+                    self.edges['verts'][num_e+1] = np.array([v, num_v+1])
+                    self.edges['cells'][num_e+1] = joint_cells
+                    self.edges['pixels'][num_e+1] = np.array([])
+                    self.edges['radius'][num_e+1] = np.Inf
+                    self.edges['rho'][num_e+1] = np.array([np.Inf, np.Inf])
+
+                    # update edges of new vertices
+                    self.vertices['edges'][v] = np.array([neg_edges, num_e+1])
+                    self.vertices['edges'][num_v+1] = np.array([pos_edges, num_e+1])
+
+                    # update cells
+
+                    # update pos cells
+                    for cell in pos_cell:
+                        self.cells['nverts'][cell][self.cells['nverts'][cell] == v] = num_v + 1
+                        self.cells['ncells'][cell] = self.cells['ncells'][cell][neg_cells not in self.cells['ncells'][cell]]
+                    # update neg cells
+                    for cell in neg_cells:
+                        self.cells['ncells'][cell] = self.cells['ncells'][cell][pos_cell not in self.cells['ncells'][cell]]
+                    # update joint cells
+                    for cell in joint_cells:
+                        self.cells['nverts'][cell] = np.array([self.cells['nverts'][cell], num_v+1])
+                        self.cells['nverts'][cell] = self.cells['nverts'][cell]+1
+        return
+
     def transform(self, q, z, p):
         """
         
@@ -56,6 +183,21 @@ class VMSI():
             radius[alpha][beta] = np.sqrt(((p[alpha-1]*p[beta-1]) * (np.linalg.norm(q[alpha-1] - q[beta-1])**2))/(p[alpha-1] - p[beta-1])**2 \
                                           - (p[alpha-1] * (z[alpha-1]**2) - p[beta-1] * (z[beta-1]**2))/(p[alpha-1] - p[beta-1]))
         return center, radius
+
+    def prepare_data(self):
+        '''
+
+        prepare data for tension inference
+        remove fourfold vertices, fit circles, identify border cells
+
+        '''
+
+        # Fit circular arcs to each edge
+        self.fit_circle()
+
+        # Recursively remove fourfold vertices by moving them apart
+        self.remove_fourfold()
+        return
         
     
     def energy(self, theta):
@@ -103,7 +245,7 @@ class VMSI():
         x = [] ; y = [] ; z = [] ; p = []
         
         for alpha in self.cells:
-            center = self.barrycenters[alpha]
+            center = self.barycenters[alpha]
     
             x.append(center[0]) ; y.append(center[1]) ; z.append(0)
             p.append(np.random.uniform(0.001, 0.005))
@@ -166,67 +308,7 @@ class VMSI():
             x = theta[:N] ; y = theta[N:2*N] ; q = np.array([x,y]).T
             p = theta[2*N:3*N]
             return q, p
-        
-        
-        # add constraints
-        def ratio_constraint(theta):
-            """
-            The solution is constrained so that the ratio of the average
-            magnitude of t to the average pressure differential
-            equals the averaged measured radius of curvature
-            in the image. 
-            
-            The average measured radius of curvature is found via least squares
-            """
-            
-            # find the ratio
-            q, p = extract(theta)
-            avg_t_norm = 0
-            avg_p_differential = 0
-            for (alpha, beta) in self.cell_pairs:
-                avg_p_differential += np.abs(p[alpha-1] - p[beta-1])
-                for i in range(2):
-                    avg_t_norm += np.linalg.norm(t(alpha, beta, q, p, i))
-            
-            ratio = avg_t_norm / (2*avg_p_differential)
-            # R_avg is precomputed outside of this function 
-            return ratio - R_avg
-        
-        # Try to make the tangent and the ti orthogonal by minimizing this function
-        def E_initial(theta):            
-            q, p = extract(theta)
-            E = 0
-            
-            E1 = abs(ratio_constraint(theta))
-            E += E1
-            
-            if len([True for i in range(len(p)) if p[i] < 0]):
-                return np.inf
-            
-            for (alpha, beta) in self.cell_pairs:
-                # for both vertices at the extremities
-                for i in range(2):
-                    E += 10e5*(t(alpha, beta, q, p, i) @ self.tangents[alpha][beta][i])**2
-            return E
 
-        def fit_circle(edge):
-            """
-            fitting the circle involves finding a point st the distance from that point to every
-            point in the egde is the same. Error to minimize is thus the variance of the distances from the center
-            """ 
-            def error(x_c, y_c):
-                center = np.array([x_c, y_c])
-                return np.std([np.linalg.norm(x - center) for x in edge])**2
-            
-            # optimize
-            center0 = np.mean(edge, axis=0)
-            x_c0, y_c0 = center0[0], center0[1] 
-            center = leastsq(error, x_c0, y_c0)[0]
-            R = np.mean([np.linalg.norm(x - center) for x in edge])
-            return R
-        
-        R_avg = np.mean([fit_circle(self.edges[alpha][beta]) for (alpha, beta) in self.cell_pairs])
-        
         theta0_with_z = list(self.initialize_points()) ; N = len(theta0_with_z)//4
         theta0 = np.array(theta0_with_z[:2*N] + theta0_with_z[3*N:4*N])  # only keep q and p
         
@@ -411,7 +493,7 @@ class VMSI():
         
 def get_actual(model, seg, dtr, generating_points):
     actual_model = VMSI(cell_pairs = seg.pairs(), edges = seg.edges(), num_cells = len(seg.cells[0]), 
-             cells = seg.cells[0], edge_cells = seg.get_edge_cells(), barrycenters = seg.barrycenters[0], height=256, width=256)
+             cells = seg.cells[0], edge_cells = seg.get_edge_cells(), barycenters = seg.barycenters[0], height=256, width=256)
     q, z, p = actual_model.extract_values(model.initialize_points())
     actual_model.get_tensions(q, z, p)
     
