@@ -25,6 +25,11 @@ class VMSI():
         # Mark fourfold vertices
         self.vertices['fourfold'] = [(np.shape(nverts)[0] != 3) for nverts in self.vertices['nverts']]
 
+        # Initialize new columns
+        self.edges['radius'] = np.zeros(len(self.edges))
+        self.edges['rho'] = tuple((0,0) for _ in range(len(self.edges)))
+        self.edges['fitenergy'] = np.zeros(len(self.edges))
+
 
     def fit_circle(self):
         """
@@ -34,10 +39,10 @@ class VMSI():
 
         """
         for i in range(len(self.edges)):
-            r1 = np.array(self.vertices.loc[self.edges.loc[i]['verts'][0]-1].coords)
-            r2 = np.array(self.vertices.loc[self.edges.loc[i]['verts'][1]-1].coords)
+            r1 = np.array(self.vertices['coords'][self.edges['verts'][i][0]])
+            r2 = np.array(self.vertices['coords'][self.edges['verts'][i][1]])
 
-            edge_pixels = [np.unravel_index(pixel, (self.width, self.height)) for pixel in self.edges.loc[i]['pixels']]
+            edge_pixels = [np.unravel_index(pixel, (self.width, self.height)) for pixel in self.edges['pixels'][i]]
 
             nB = np.matmul(np.array([[0, 1], [-1, 0]]), r1 - r2)
             D = np.sqrt(np.sum(np.power(nB, 2)))
@@ -63,16 +68,17 @@ class VMSI():
             E = res.fun
 
             linedistance = np.mean(np.power(IP, 2))
-            if (E < linedistance & len(edge_pixels) > 3):
-                self.edges.loc[i]['radius'] = np.sqrt(np.power(y, 2) + np.power(L0, 2))
-                self.edges.loc[i]['rho'] = x0 + (y * nB)
-                self.edges.loc[i]['fitenergy'] = E
+            if (E < linedistance and len(edge_pixels) > 3):
+                self.edges.at[i,'radius'] = np.sqrt(np.power(y, 2) + np.power(L0, 2))
+                self.edges.at[i,'rho'] = x0 + (y * nB)
+                self.edges.at[i,'fitenergy'] = E
             else:
-                self.edges.loc[i]['radius'] = np.Inf
-                self.edges.loc[i]['rho'] = np.array([np.Inf, np.Inf])
-                self.edges.loc[i]['fitenergy'] = linedistance
+                self.edges.at[i,'radius'] = np.Inf
+                self.edges.at[i,'rho'] = np.array([np.Inf, np.Inf])
+                self.edges.at[i,'fitenergy'] = linedistance
 
         return
+
 
     def remove_fourfold(self):
         """
@@ -82,7 +88,7 @@ class VMSI():
         """
 
         for v in range(len(self.vertices)):
-            if (np.shape(self.vertices['nverts'][v])[0] > 3  and not (1 in self.vertices['ncells'][v])):
+            if (np.shape(self.vertices['nverts'][v])[0] > 3  and not (0 in self.vertices['ncells'][v])):
                 while (np.shape(self.vertices['nverts'][v])[0] > 3):
                     num_v = len(self.vertices)
                     num_e = len(self.edges)
@@ -91,81 +97,146 @@ class VMSI():
                     nedges = self.vertices['edges'][v]
                     ncells = self.vertices['ncells'][v]
 
-                    R = self.vertices['coords'][nverts]
-                    rV = self.vertices['coords'][v]
+                    R = np.array([self.vertices['coords'][vert] for vert in nverts])
+                    rV = np.array(self.vertices['coords'][v])
 
-                    R = R - np.mean(R, axis=1)
-                    I = R * R.T
+                    R = R - np.mean(R, axis=0)
+                    I = np.matmul(R.T,R)
 
                     W, V = np.linalg.eig(I)
                     direction = V[:,np.argmax(W)]
 
+                    # create two new vertices, positive and negative
                     rV1 = rV + (direction/2)
                     rV2 = rV - (direction/2)
 
                     # set positive neighbour vertices to the 2 vertices closest to the direction of vertex movement
-                    # all other neighbour vertices remain with negative vertex
+                    # all other neighbour vertices are negative
                     indices = np.argsort(np.dot(R, direction))[-2:]
-                    pos_verts = np.zeros_like(indices)
+                    pos_verts = np.zeros_like(nverts)
                     pos_verts[indices] = 1
                     neg_verts = 1 - pos_verts
 
                     # change vertex with current index to negative vertex
-                    self.vertices['coords'][v] = rV2
-                    self.vertices['nverts'][v] = np.array([nverts[neg_verts.astype('bool')], num_v+1])
-                    self.vertices['fourfold'][v] = (np.shape(self.vertices['nverts'][v])[0] > 3)
+                    self.vertices.at[v,'coords'] = rV2
+                    self.vertices.at[v,'nverts'] = np.concatenate((nverts[neg_verts.astype('bool')], np.array([num_v])))
+                    self.vertices.at[v,'fourfold'] = (np.shape(self.vertices['nverts'][v])[0] > 3)
 
-                    neg_cells = ncells[[(np.isin(self.vertices['nverts'][v], self.cells['nverts'][cell]) == 2) for cell in ncells]]
+                    neg_cells = ncells[[(sum(np.isin(nverts[neg_verts.astype('bool')], self.cells['nverts'][cell]))==2) for cell in ncells]]
 
                     # add positive vertex
-                    self.vertices['coords'][num_v+1] = rV1
-                    self.vertices['nverts'][num_v+1] = np.array([nverts[pos_verts.astype('bool')], v])
-                    self.vertices['fourfold'][num_v+1] = 0
+                    self.vertices = self.vertices.append({'coords':[0,0],'ncells':np.array([]),'nverts':np.array([]),'edges':np.array([])}, ignore_index=True)
+                    self.vertices.at[num_v,'coords'] = rV1
+                    self.vertices.at[num_v,'nverts'] = np.concatenate((nverts[pos_verts.astype('bool')], np.array([v])))
+                    self.vertices.at[num_v,'fourfold'] = 0
 
-                    pos_cell = ncells[[(np.isin(self.vertices['nverts'][num_v+1], self.cells['nverts'][cell]) == 2) for cell in ncells]]
+                    pos_cell = ncells[[(sum(np.isin(nverts[pos_verts.astype('bool')], self.cells['nverts'][cell]))==2) for cell in ncells]]
 
                     # update new positive vertex index for neighbour vertices
                     for vert in nverts[pos_verts.astype('bool')]:
-                        self.vertices['nverts'][vert][self.vertices['nverts'][vert] == v] = num_v+1
+                        self.vertices.at[vert, 'nverts'][self.vertices['nverts'][vert] == v] = num_v
 
-                    joint_cells = ncells[not (np.isin(ncells, np.array([pos_cell, neg_cells])))]
+                    joint_cells = ncells[np.invert(np.isin(ncells, np.array([pos_cell, neg_cells])))]
 
-                    self.vertices['ncells'][v] = np.array([joint_cells, neg_cells])
-                    self.vertices['ncells'][num_v+1] = np.array([joint_cells, pos_cell])
+                    self.vertices.at[v,'ncells'] = np.concatenate((joint_cells, neg_cells))
+                    self.vertices.at[num_v,'ncells'] = np.concatenate((joint_cells, pos_cell))
 
                     # update current edges
+                    # this requires edges to be in the same order as vertices
                     neg_edges = nedges[neg_verts.astype('bool')]
                     pos_edges = nedges[pos_verts.astype('bool')]
 
-                    self.edges['verts'][pos_edges[0]] = num_v+1
-                    self.edges['verts'][pos_edges[1]] = num_v+1
+                    self.edges.at[pos_edges[0],'verts'] = num_v
+                    self.edges.at[pos_edges[1],'verts'] = num_v
 
                     # create new edge between new vertices
                     # edge is only one pixel long so no need to add pixels
-                    self.edges['verts'][num_e+1] = np.array([v, num_v+1])
-                    self.edges['cells'][num_e+1] = joint_cells
-                    self.edges['pixels'][num_e+1] = np.array([])
-                    self.edges['radius'][num_e+1] = np.Inf
-                    self.edges['rho'][num_e+1] = np.array([np.Inf, np.Inf])
+                    self.edges = self.edges.append({'pixels':np.array([]),'verts':np.array([]),'cells':np.array([]),
+                                                    'radius':np.array([]), 'rho':np.array([])},ignore_index=True)
+
+                    self.edges.at[num_e,'verts'] = np.array([v, num_v])
+                    self.edges.at[num_e,'cells'] = joint_cells
+                    self.edges.at[num_e,'pixels'] = np.array([])
+                    self.edges.at[num_e,'radius'] = np.Inf
+                    self.edges.at[num_e,'rho'] = np.array([np.Inf, np.Inf])
 
                     # update edges of new vertices
-                    self.vertices['edges'][v] = np.array([neg_edges, num_e+1])
-                    self.vertices['edges'][num_v+1] = np.array([pos_edges, num_e+1])
+                    self.vertices.at[v,'edges'] = np.concatenate((neg_edges, np.array([num_e])))
+                    self.vertices.at[num_v,'edges'] = np.concatenate((pos_edges, np.array([num_e])))
 
                     # update cells
 
                     # update pos cells
                     for cell in pos_cell:
-                        self.cells['nverts'][cell][self.cells['nverts'][cell] == v] = num_v + 1
-                        self.cells['ncells'][cell] = self.cells['ncells'][cell][neg_cells not in self.cells['ncells'][cell]]
+                        self.cells.at[cell,'nverts'][self.cells['nverts'][cell] == v] = num_v
+                        self.cells.at[cell,'ncells'] = self.cells.at[cell,'ncells'][neg_cells != self.cells.at[cell,'ncells']]
                     # update neg cells
                     for cell in neg_cells:
-                        self.cells['ncells'][cell] = self.cells['ncells'][cell][pos_cell not in self.cells['ncells'][cell]]
+                        self.cells.at[cell,'ncells'] = self.cells.at[cell,'ncells'][pos_cell != self.cells.at[cell,'ncells']]
                     # update joint cells
                     for cell in joint_cells:
-                        self.cells['nverts'][cell] = np.array([self.cells['nverts'][cell], num_v+1])
-                        self.cells['nverts'][cell] = self.cells['nverts'][cell]+1
+                        self.cells.at[cell,'nverts'] = np.concatenate((self.cells.at[cell,'nverts'], np.array([num_v])))
+                        self.cells.at[cell,'numv'] = self.cells.at[cell,'numv']+1
         return
+
+
+    def make_convex(self):
+        """
+
+        remove concave vertices by moving vertex to ensure all angles < pi
+
+        """
+
+        # find boundary vertices
+        boundary_verts = self.cells.at[0,'nverts']
+
+        # iterate through all non-boundary verts
+        for v in range(len(self.vertices)):
+            if (v not in boundary_verts and len(self.vertices.at[v,'nverts']) == 3):
+
+                rv = self.vertices['coords'][v]
+                nverts = self.vertices['nverts'][v]
+
+                n = np.array([self.vertices['coords'][nverts[0]],
+                              self.vertices['coords'][nverts[1]],
+                              self.vertices['coords'][nverts[2]]])
+
+                n_centered = n - np.mean(n, axis=0)
+                theta = np.mod(np.arctan2(n_centered[:,1], n_centered[:,0]), 2*np.pi)
+                n = n[np.argsort(theta),:]
+
+                r = n - rv
+                r = np.divide(r.T,(np.linalg.norm(r, axis=1))).T
+
+                z12 = np.cross(np.concatenate((r[0,:], np.array([0]))), np.concatenate((r[1,:], np.array([0]))))
+                z23 = np.cross(np.concatenate((r[1,:], np.array([0]))), np.concatenate((r[2,:], np.array([0]))))
+                z31 = np.cross(np.concatenate((r[2,:], np.array([0]))), np.concatenate((r[0,:], np.array([0]))))
+
+                theta12 = np.mod(np.arctan2(z12[2], np.dot(r[0,:], r[1,:])), 2*np.pi)
+                theta23 = np.mod(np.arctan2(z23[2], np.dot(r[1,:], r[2,:])), 2*np.pi)
+                theta31 = np.mod(np.arctan2(z31[2], np.dot(r[2,:], r[0,:])), 2*np.pi)
+
+                if theta12 > np.pi:
+                    deltaR = np.dot(n[0,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[0,:]-n[1,:])) / np.dot(n[2,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[0,:]-n[1,:]))
+                    nrv = rv + 1.5*deltaR*(n[2,:]-rv)
+                elif theta23 > np.pi:
+                    deltaR = np.dot(n[1,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[1,:]-n[2,:])) / np.dot(n[0,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[1,:]-n[2,:]))
+                    nrv = rv + 1.5*deltaR*(n[0,:]-rv)
+                elif theta31 > np.pi:
+                    deltaR = np.dot(n[2,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[2,:]-n[0,:])) / np.dot(n[1,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[2,:]-n[0,:]))
+                    nrv = rv + 1.5*deltaR*(n[1,:]-rv)
+                elif theta12 == np.pi:
+                    nrv = rv + 0.5*r[2,:]
+                elif theta23 == np.pi:
+                    nrv = rv + 0.5*r[0,:]
+                elif theta31 == np.pi:
+                    nrv = rv + 0.5*r[1,:]
+                else:
+                    nrv = rv
+
+                self.vertices.at[v,'coords'] = nrv
+        return
+
 
     def transform(self, q, z, p):
         """
@@ -185,18 +256,21 @@ class VMSI():
         return center, radius
 
     def prepare_data(self):
-        '''
+        """
 
         prepare data for tension inference
-        remove fourfold vertices, fit circles, identify border cells
+        remove fourfold vertices, fit circles, make vertices convex
 
-        '''
+        """
 
         # Fit circular arcs to each edge
         self.fit_circle()
 
         # Recursively remove fourfold vertices by moving them apart
         self.remove_fourfold()
+
+        # Inference cannot handle concave vertices (with one angle greater than pi) so remove these
+        self.make_convex()
         return
         
     
@@ -251,90 +325,17 @@ class VMSI():
             p.append(np.random.uniform(0.001, 0.005))
                 
         return np.array(x + y + z + p)
-    
-    def get_vertices(self, alpha, beta):
-        """
-        
-        return the two vertices between any two cells
-        
-        """
-        
-        edge = self.edges[alpha][beta]
-        
-        # find the edge endpoints
-        edge_mean = np.mean(edge, axis=0)
-        start_ind = np.argmax(np.array([np.linalg.norm(x - edge_mean) for x in edge]))
-        end_ind = np.argmax(np.array([np.linalg.norm(x - edge[start_ind]) for x in edge]))
-        start = np.array(edge[start_ind]) ; end = np.array(edge[end_ind])
-                    
-        return [start, end]
-    
-    def get_tangents(self, alpha, beta):
-        """
-        finds the normalized tangents at the two vertices in the edge between alpha and beta
-        """
-        v1, v2 = self.vertices[alpha][beta]
-        
-        # find closest points in the edge to each of the vertices and find line that goes through them
-        edge = [e for e in self.edges[alpha][beta] if list(e) not in [list(v1), list(v2)]]
-
-        v1_b = np.mean(np.array([edge[i] for i in np.array([np.linalg.norm(x - v1) for x in edge]).argsort()[:5]]), axis=0)
-        v2_b = np.mean(np.array([edge[i] for i in np.array([np.linalg.norm(x - v2) for x in edge]).argsort()[:5]]), axis=0)
-
-        # compute tangents
-        t1 = (v1_b - v1) / np.linalg.norm(v1_b - v1)
-        t2 = (v2_b - v2) / np.linalg.norm(v2_b - v2)
-        
-        return [t1, t2]
         
     
     def initialize(self):
         """
         
-        Minimization to determine initial (p, q) -- we want the vector pointing from the center each of the 
-        vertices to be orthogonal to the tangents. Minimization of C1 with some constraints to avoid trivial 
-        solutions
+        estimate initial values for p, q, theta
+        perform initial minimization using estimated values
         
         """
         
-        # define the shorthand t_i where i in {1, 2} denotes the vertex in question between cells alpha and beta. It is 
-        # the vector from the center of cell alpha to vertex i in between alpha and beta
-        t = lambda alpha, beta, q, p, i : (p[alpha-1] - p[beta-1])*self.vertices[alpha][beta][i] - (p[alpha-1]*q[alpha-1] - p[beta-1]*q[beta-1])
-        
-        
-        def extract(theta):
-            # get p and q from theta used in the following minimization
-            N = len(theta)//3
-            x = theta[:N] ; y = theta[N:2*N] ; q = np.array([x,y]).T
-            p = theta[2*N:3*N]
-            return q, p
-
-        theta0_with_z = list(self.initialize_points()) ; N = len(theta0_with_z)//4
-        theta0 = np.array(theta0_with_z[:2*N] + theta0_with_z[3*N:4*N])  # only keep q and p
-        
-        bounds = []
-        N = len(theta0)//3
-        for i in range(len(theta0)):
-            if i <= N: # x
-                bounds.append((max(0, theta0[i]-10), min(theta0[i]+10, self.width)))
-            elif i <= 2*N: # y 
-                bounds.append((max(0, theta0[i]-10), min(theta0[i]+10, self.height)))
-            else: # p
-                bounds.append((0.001, 0.005))
-
-        # minimize to find the optimal q and p
-        print("Finding the initialization of q and p")
-        q, p = extract(theta0)
-        optimal = minimize(E_initial, theta0, options={'disp':True}, bounds=bounds).x
-        print(E_initial(optimal))
-
-        q, p =  extract(optimal)
-        x = q.T[0] ; y = q.T[1]
-        
-        # find z. For NOW, set to be 0 -- later, we will implement the actual equation
-        z = [0 for _ in range(len(p))]
-
-        return np.array(list(x) + list(y) + list(z) + list(p))
+        return
         
     def load_constraints(self, theta0):
         """
@@ -382,7 +383,9 @@ class VMSI():
         Perform the minimization of equation 5 with respect to the variables (q, z, p)
         
         """
-        
+        self.prepare_data()
+
+
         # initialize the vector
         theta0 = self.initialize()
         #theta0 = self.initialize_points()
