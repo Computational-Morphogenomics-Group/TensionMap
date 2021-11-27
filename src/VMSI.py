@@ -30,6 +30,16 @@ class VMSI():
         self.edges['rho'] = tuple((0,0) for _ in range(len(self.edges)))
         self.edges['fitenergy'] = np.zeros(len(self.edges))
 
+        # Initialize operators
+        self.dV = None
+        self.dC = None
+        self.involved_cells = None
+        self.involved_vertices = None
+        self.bulk_cells = None
+        self.bulk_vertices = None
+        self.ext_cells = None
+        self.ext_vertices = None
+
 
     def fit_circle(self):
         """
@@ -49,7 +59,7 @@ class VMSI():
             nB = np.divide(nB, D)
             x0 = 0.5*(r1 + r2)
 
-            delta = edge_pixels - x0
+            delta = np.subtract(edge_pixels, x0)
             IP = (delta[:,0] * nB[0]) + (delta[:,1] * nB[1])
             L0 = D/2
 
@@ -169,10 +179,10 @@ class VMSI():
                     # update pos cells
                     for cell in pos_cell:
                         self.cells.at[cell,'nverts'][self.cells['nverts'][cell] == v] = num_v
-                        self.cells.at[cell,'ncells'] = self.cells.at[cell,'ncells'][neg_cells != self.cells.at[cell,'ncells']]
+                        self.cells.at[cell,'ncells'] = self.cells.at[cell, 'ncells'][np.isin(self.cells.at[cell,'ncells'], neg_cells, invert=True)]
                     # update neg cells
                     for cell in neg_cells:
-                        self.cells.at[cell,'ncells'] = self.cells.at[cell,'ncells'][pos_cell != self.cells.at[cell,'ncells']]
+                        self.cells.at[cell,'ncells'] = self.cells.at[cell, 'ncells'][np.isin(self.cells.at[cell,'ncells'], pos_cell, invert=True)]
                     # update joint cells
                     for cell in joint_cells:
                         self.cells.at[cell,'nverts'] = np.concatenate((self.cells.at[cell,'nverts'], np.array([num_v])))
@@ -255,6 +265,7 @@ class VMSI():
                                           - (p[alpha-1] * (z[alpha-1]**2) - p[beta-1] * (z[beta-1]**2))/(p[alpha-1] - p[beta-1]))
         return center, radius
 
+
     def prepare_data(self):
         """
 
@@ -272,8 +283,121 @@ class VMSI():
         # Inference cannot handle concave vertices (with one angle greater than pi) so remove these
         self.make_convex()
         return
-        
-    
+
+
+    def classify_cells(self):
+        """
+
+        determine which cells are involved in tension inference
+        initialize q as cell centroids
+
+        """
+
+        # This is enough for now, but may need to update to deal with holes
+        self.bulk_cells = np.array(range(1,len(self.cells)))
+
+        boundary_cells = np.unique(self.cells.at[0, 'ncells'])
+
+        # Remove boundary cells and cells surrounded by boundary cells from bulk cells
+        self.bulk_cells = self.bulk_cells[np.isin(self.bulk_cells, boundary_cells, invert=True)]
+        bad_cells = np.array([])
+        for cell in self.bulk_cells:
+            if np.sum(np.isin(self.cells.at[cell, 'ncells'], self.bulk_cells)) == 0:
+                bad_cells = np.append(bad_cells, cell)
+        self.bulk_cells = self.bulk_cells[np.isin(self.bulk_cells, bad_cells, invert=True)]
+        self.bulk_vertices = np.unique(np.concatenate([self.cells.at[cell, 'nverts'] for cell in self.bulk_cells]))
+
+        self.involved_cells = np.unique(np.concatenate([self.vertices.at[vert, 'ncells'] for vert in self.bulk_vertices]))
+        self.ext_cells = self.involved_cells[np.isin(self.involved_cells, self.bulk_cells, invert=True)]
+        self.involved_cells = np.concatenate((self.bulk_cells, self.ext_cells))
+
+        self.involved_vertices = np.unique(np.concatenate([self.vertices.at[vert, 'nverts'] for vert in self.bulk_vertices]))
+        self.ext_vertices = self.involved_vertices[np.isin(self.involved_vertices, self.bulk_vertices, invert=True)]
+        self.involved_vertices = np.concatenate((self.bulk_vertices, self.ext_vertices))
+
+        x0 = np.vstack([np.stack(self.cells['centroids'][self.involved_cells]).T,
+                        np.zeros(len(self.involved_cells))]).T
+
+        return x0
+
+
+    def build_diff_operators(self):
+        """
+
+        compute difference operators to enable vectorized operations
+
+        """
+        # Build cell adjacency matrix
+        adj_mat = np.zeros((len(self.involved_cells), len(self.involved_cells)))
+        num_edges = 0
+
+        for i in range(len(self.involved_cells)):
+            cell = self.involved_cells[i]
+            for ncell in self.cells.at[cell, 'ncells']:
+                j = np.ravel(np.where(self.involved_cells == ncell))
+                if j.size > 0 and adj_mat[i, j] == 0:
+                    adj_mat[i, j] = 1
+                    adj_mat[j, i] = 1
+                    num_edges += 1
+
+        # Compute difference operators
+        self.dC = np.zeros((num_edges, len(self.involved_cells)))
+        self.dV = np.zeros((num_edges, len(self.involved_vertices)))
+
+        diff_index = 0
+        for i in range(len(self.involved_cells)):
+            ncells = np.ravel(np.where(adj_mat[i,:] == 1))
+            ncells = ncells[ncells > i]
+
+            for cell in ncells:
+                self.dC[diff_index, i] = 1
+                self.dC[diff_index, cell] = -1
+
+                verts = np.intersect1d(self.cells['nverts'][self.involved_cells[i]], self.cells['nverts'][self.involved_cells[cell]])
+
+                if (len(verts) == 2):
+                    self.dV[diff_index, np.where(self.involved_vertices == verts[0])] = 1
+                    self.dV[diff_index, np.where(self.involved_vertices == verts[1])] = -1
+
+                diff_index += 1
+
+        # Check for bad vertices and edges
+        bad_verts = np.invert(np.sum(np.abs(self.dV), axis=0) == 0)
+        self.dV = self.dV[:,bad_verts]
+        self.involved_vertices = self.involved_vertices[bad_verts]
+
+        bad_edges = np.invert(np.sum(np.abs(self.dV), axis=1) < 2)
+        self.dV = self.dV[bad_edges,:]
+        self.dC = self.dC[bad_edges,:]
+
+        return
+
+    def estimate_tau(self):
+        """
+
+        estimate tension vector tau from vector t
+
+        """
+
+        self.build_diff_operators()
+
+        edge_index = np.zeros(self.dC.shape[0])
+        for i in range(self.dC.shape[0]):
+            edge_cells = self.involved_cells[np.ravel(np.where(self.dC[i,] != 0))]
+            edge_index[i] = np.intersect1d(self.cells.at[edge_cells[0], 'edges'], self.cells.at[edge_cells[1], 'edges'])
+
+
+        return
+
+    def initial_minimization(self):
+
+        x0 = self.classify_cells()
+
+        self.estimate_tau()
+
+        return
+
+
     def energy(self, theta):
         """
         
@@ -385,13 +509,8 @@ class VMSI():
         """
         self.prepare_data()
 
-
-        # initialize the vector
-        theta0 = self.initialize()
-        #theta0 = self.initialize_points()
-                
-        # get the bounds and constraints
-        bounds, constraints = self.load_constraints(theta0)
+        # Perform initial minimization
+        self.initial_minimization()
         
         print("Main minimization")
         # minimize
