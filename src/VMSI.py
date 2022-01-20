@@ -1,18 +1,20 @@
 import cv2
 import glob
+
+import cyipopt
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
-from cellpose import models
-from cellpose import utils
-from cellpose import plot
+#from cellpose import models
+#from cellpose import utils
+#from cellpose import plot
 from scipy.ndimage import generic_filter
 import itertools
 from tqdm import tqdm
 from scipy.optimize import minimize, leastsq
 from scipy.sparse import coo_matrix
 import pandas as pd
-
+from cyipopt import minimize_ipopt
 
 def sx_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
     t3 = p1-p2
@@ -33,9 +35,9 @@ def sx_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
     t17 = q2x-rx
 
     Dx = np.array([p1*t15-p1*t8*t14,-p1*t2*t4*t14,
-          t15*t16-t2*t14*(t2*t16*2+t4*(q1y-ry)*2)*(0.5),
-          -p2*t15+p2*t8*t14,p2*t2*t4*t14,
-          -t15*t17+t2*t14*(t2*t17*2+t4*(q2y-ry)*2)*(0.5)]).T
+                   t15*t16-t2*t14*(t2*t16*2+t4*(q1y-ry)*2)*(0.5),
+                   -p2*t15+p2*t8*t14,p2*t2*t4*t14,
+                   -t15*t17+t2*t14*(t2*t17*2+t4*(q2y-ry)*2)*(0.5)]).T
     return Dx
 
 def sy_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
@@ -56,9 +58,9 @@ def sy_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
     t16 = q1y-ry
     t17 = q2y-ry
     Dy = np.array([-p1*t2*t4*t14,p1*t15-p1*t12*t14,
-            t15*t16-t4*t14*(t4*t16*2+t2*(q1x-rx)*2)*(0.5),
-            p2*t2*t4*t14,-p2*t15+p2*t12*t14,
-            -t15*t17+t4*t14*(t4*t17*2+t2*(q2x-rx)*2)*(0.5)]).T
+                   t15*t16-t4*t14*(t4*t16*2+t2*(q1x-rx)*2)*(0.5),
+                   p2*t2*t4*t14,-p2*t15+p2*t12*t14,
+                   -t15*t17+t4*t14*(t4*t17*2+t2*(q2x-rx)*2)*(0.5)]).T
     return Dy
 
 def radius_grad_theta(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
@@ -131,9 +133,9 @@ def radius_grad(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
     t26 = np.divide(1,np.power(t4,3))
     t27 = t13*t26*2
     dR = np.array([t20,t24,t14*t25*(-0.5),
-        t14*(t27+t7*(-t1+t2+p2*t12))*(0.5),
-        -t20,-t24,t14*t25*(0.5),
-        t14*(t27-t7*(t1-t2+p1*t12))*(-0.5)]).T
+                   t14*(t27+t7*(-t1+t2+p2*t12))*(0.5),
+                   -t20,-t24,t14*t25*(0.5),
+                   t14*(t27-t7*(t1-t2+p1*t12))*(-0.5)]).T
     return dR
 
 def rho_x_hess(p1,p2,q1x,q2x):
@@ -152,14 +154,14 @@ def rho_x_hess(p1,p2,q1x,q2x):
     t14 = -t9+t12+t13
     t15 = -t5-t10
     z = np.zeros_like(p1)
-    Hx = np.array([z,z,z,-t4+t5,z,z,z,t4,\
-      z,z,z,z,z,z,z,z,\
-      z,z,z,z,z,z,z,z,\
-      t5-p1*t3,z,z,t9-q1x*t3*2,t10,z,z,t14,\
-      z,z,z,t10,z,z,z,t15,\
-      z,z,z,z,z,z,z,z,\
-      z,z,z,z,z,z,z,z,\
-      t4,z,z,t14,t15,z,z,t9-q2x*t3*2]).T
+    Hx = np.array([z,z,z,-t4+t5,z,z,z,t4, \
+                   z,z,z,z,z,z,z,z, \
+                   z,z,z,z,z,z,z,z, \
+                   t5-p1*t3,z,z,t9-q1x*t3*2,t10,z,z,t14, \
+                   z,z,z,t10,z,z,z,t15, \
+                   z,z,z,z,z,z,z,z, \
+                   z,z,z,z,z,z,z,z, \
+                   t4,z,z,t14,t15,z,z,t9-q2x*t3*2]).T
     return Hx
 
 def rho_y_hess(p1,p2,q1y,q2y):
@@ -178,14 +180,14 @@ def rho_y_hess(p1,p2,q1y,q2y):
     t14 = -t9+t12+t13
     t15 = -t5-t10
     z = np.zeros_like(p1)
-    Hy = np.array([z,z,z,z,z,z,z,z,\
-      z,z,z,-t4+t5,z,z,z,t4,\
-      z,z,z,z,z,z,z,z,\
-      z,t5-p1*t3,z,t9-q1y*t3*2,z,t10,z,t14,\
-      z,z,z,z,z,z,z,z,\
-      z,z,z,t10,z,z,z,t15,\
-      z,z,z,z,z,z,z,z,\
-      z,t4,z,t14,z,t15,z,t9-q2y*t3*2]).T
+    Hy = np.array([z,z,z,z,z,z,z,z, \
+                   z,z,z,-t4+t5,z,z,z,t4, \
+                   z,z,z,z,z,z,z,z, \
+                   z,t5-p1*t3,z,t9-q1y*t3*2,z,t10,z,t14, \
+                   z,z,z,z,z,z,z,z, \
+                   z,z,z,t10,z,z,z,t15, \
+                   z,z,z,z,z,z,z,z, \
+                   z,t4,z,t14,z,t15,z,t9-q2y*t3*2]).T
     return Hy
 
 def radius_hess(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
@@ -270,15 +272,15 @@ def radius_hess(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
     t82 = t70+t81
     t83 = t23*t82*(0.5)
     t84 = t42+t71
-    Hr = np.array([p1*p2*t7*1/np.sqrt(-t7*t14)-t15*t16*t20*t21*t25*(0.25),-t31,t29,\
-          t49-p1*p2*t7*t8*t20*t35*(0.25),-t36+t54,t31,-t29,t59+t80,t8*t15*t16*t20*t21*t28*(-0.25),\
-          t36-t15*t16*t20*t21*t37*(0.25),t38,t52-p1*p2*t7*t20*t28*t35*(0.25),t31,t61,-t38,t66+t83,\
-          t29,t38,t7*t20*(-0.25),t46,-t29,-t38,t67,-t42-t71,t55-p1*p2*t8*t23*t24-p1*p2*t7*t8*t20*t35*(0.25),\
-          t62-p1*p2*t23*t24*t28-p1*p2*t7*t20*t28*t35*(0.25),t46,\
-          t20*np.power(t35,2)*(-0.25)-t23*(t53+t24*t33*4)*(0.5),-t55+t56+t57,-t62+t63+t64,t68,t77,\
-          t54-p1*p2*t7*t23,t31,-t29,-t49+t57,t36-t54,-t31,t29,-t59-t80,t31,t61,-t38,-t52+t64,-t31,t36-t60,\
-          t38,-t66-t83,-t29,-t38,t67,t68,t29,t38,-t67,t84,t56+t58+t59,t63+t65+t66,-t42-t20*t41*t44*(0.25),\
-          t77,-t56-t58-t59,-t63-t65-t66,t84,t20*np.power(t41,2)*(-0.25)-t23*(t53-t24*t40*4)*(0.5)]).T
+    Hr = np.array([p1*p2*t7*1/np.sqrt(-t7*t14)-t15*t16*t20*t21*t25*(0.25),-t31,t29, \
+                   t49-p1*p2*t7*t8*t20*t35*(0.25),-t36+t54,t31,-t29,t59+t80,t8*t15*t16*t20*t21*t28*(-0.25), \
+                   t36-t15*t16*t20*t21*t37*(0.25),t38,t52-p1*p2*t7*t20*t28*t35*(0.25),t31,t61,-t38,t66+t83, \
+                   t29,t38,t7*t20*(-0.25),t46,-t29,-t38,t67,-t42-t71,t55-p1*p2*t8*t23*t24-p1*p2*t7*t8*t20*t35*(0.25), \
+                   t62-p1*p2*t23*t24*t28-p1*p2*t7*t20*t28*t35*(0.25),t46, \
+                   t20*np.power(t35,2)*(-0.25)-t23*(t53+t24*t33*4)*(0.5),-t55+t56+t57,-t62+t63+t64,t68,t77, \
+                   t54-p1*p2*t7*t23,t31,-t29,-t49+t57,t36-t54,-t31,t29,-t59-t80,t31,t61,-t38,-t52+t64,-t31,t36-t60, \
+                   t38,-t66-t83,-t29,-t38,t67,t68,t29,t38,-t67,t84,t56+t58+t59,t63+t65+t66,-t42-t20*t41*t44*(0.25), \
+                   t77,-t56-t58-t59,-t63-t65-t66,t84,t20*np.power(t41,2)*(-0.25)-t23*(t53-t24*t40*4)*(0.5)]).T
     return Hr
 
 def const_hess(p1,p2,q1x,q1y,q2x,q2y):
@@ -298,18 +300,169 @@ def const_hess(p1,p2,q1x,q1y,q2x,q2y):
     t15 = np.power(t9,2)
     t16 = np.power(t10,2)
     t17 = -t15-t16
-    Hc = np.array([p1*p2*-2,np.zeros_like(p1),np.zeros_like(p1),-p2*t4,t5,np.zeros_like(p1),np.zeros_like(p1),\
-             -t13,np.zeros_like(p1),-t5,np.zeros_like(p1),-p2*t8,np.zeros_like(p1),t5,np.zeros_like(p1),-t14,\
-             np.zeros_like(p1),np.zeros_like(p1),np.zeros_like(p1),np.ones_like(p1),np.zeros_like(p1),np.zeros_like(p1),\
-             np.zeros_like(p1),-np.ones_like(p1),-p2*t4,-p2*t8,np.ones_like(p1),np.zeros_like(p1),t11,t12,-np.ones_like(p1),\
-             t17,t5,np.zeros_like(p1),np.zeros_like(p1),t11,-t5,np.zeros_like(p1),np.zeros_like(p1),t13,np.zeros_like(p1),\
-             t5,np.zeros_like(p1),t12,np.zeros_like(p1),-t5,np.zeros_like(p1),t14,np.zeros_like(p1),np.zeros_like(p1),np.zeros_like(p1),\
-             -np.ones_like(p1),np.zeros_like(p1),np.zeros_like(p1),np.zeros_like(p1),np.ones_like(p1),-p1*t4,-p1*t8,-np.ones_like(p1),\
-             t17,t13,t14,np.ones_like(p1),np.zeros_like(p1)]).T
+    Hc = np.array([p1*p2*-2,np.zeros_like(p1),np.zeros_like(p1),-p2*t4,t5,np.zeros_like(p1),np.zeros_like(p1), \
+                   -t13,np.zeros_like(p1),-t5,np.zeros_like(p1),-p2*t8,np.zeros_like(p1),t5,np.zeros_like(p1),-t14, \
+                   np.zeros_like(p1),np.zeros_like(p1),np.zeros_like(p1),np.ones_like(p1),np.zeros_like(p1),np.zeros_like(p1), \
+                   np.zeros_like(p1),-np.ones_like(p1),-p2*t4,-p2*t8,np.ones_like(p1),np.zeros_like(p1),t11,t12,-np.ones_like(p1), \
+                   t17,t5,np.zeros_like(p1),np.zeros_like(p1),t11,-t5,np.zeros_like(p1),np.zeros_like(p1),t13,np.zeros_like(p1), \
+                   t5,np.zeros_like(p1),t12,np.zeros_like(p1),-t5,np.zeros_like(p1),t14,np.zeros_like(p1),np.zeros_like(p1),np.zeros_like(p1), \
+                   -np.ones_like(p1),np.zeros_like(p1),np.zeros_like(p1),np.zeros_like(p1),np.ones_like(p1),-p1*t4,-p1*t8,-np.ones_like(p1), \
+                   t17,t13,t14,np.ones_like(p1),np.zeros_like(p1)]).T
     return Hc
 
+def sx_hess(p1,p2,q1x,q1y,q2x,q2y,rx,ry):
+    t3 = p1-p2
+    t5 = p1*q1x
+    t6 = p2*q2x
+    t7 = rx*t3
+    t2 = -t5+t6+t7
+    t10 = p1*q1y
+    t11 = p2*q2y
+    t12 = ry*t3
+    t4 = -t10+t11+t12
+    t8 = np.power(p1,2)
+    t9 = np.power(t2,2)
+    t13 = np.power(t4,2)
+    t14 = t9+t13
+    t15 = 1.0/np.power(t14,1.5)
+    t16 = 1.0/np.power(t14,2.5)
+    t17 = q1x-rx
+    t18 = t2*t17*2.0
+    t19 = q1y-ry
+    t20 = t4*t19*2.0
+    t21 = t18+t20
+    t22 = q2x-rx
+    t23 = t2*t22*2.0
+    t24 = q2y-ry
+    t25 = t4*t24*2.0
+    t26 = t23+t25
+    t27 = t4*t8*t15
+    t28 = t27-t4*t8*t9*t16*3.0
+    t29 = p1*p2*t4*t9*t16*3.0
+    t36 = p1*p2*t4*t15
+    t30 = t29-t36
+    t31 = 1.0/np.sqrt(t14)
+    t32 = p1*t15*t21*(1.0/2.0)
+    t33 = p1*t4*t15*t17
+    t34 = p1*p2*t2*t9*t16*3.0
+    t35 = t34-p1*p2*t2*t15*3.0
+    t37 = p2*t9*t16*t21*(3.0/2.0)
+    t38 = t37-p2*t15*t21*(1.0/2.0)-p2*t2*t15*t17*2.0
+    t39 = np.power(p2,2)
+    t40 = p1*p2*t2*t13*t16*3.0
+    t41 = t40-p1*p2*t2*t15
+    t42 = p2*t2*t4*t16*t21*(3.0/2.0)
+    t43 = t42-p2*t2*t15*t19-p2*t4*t15*t17
+    t44 = t4*t15*t39
+    t45 = t44-t4*t9*t16*t39*3.0
+    t46 = p1*t9*t16*t26*(3.0/2.0)
+    t47 = t46-p1*t15*t26*(1.0/2.0)-p1*t2*t15*t22*2.0
+    t48 = p1*t2*t4*t16*t26*(3.0/2.0)
+    t49 = t48-p1*t2*t15*t24-p1*t4*t15*t22
+    t50 = t17*t22*2.0
+    t51 = t19*t24*2.0
+    t52 = t50+t51
+    t53 = t2*t16*t21*t26*(3.0/4.0)
+    t54 = t53-t15*t17*t26*(1.0/2.0)-t15*t21*t22*(1.0/2.0)-t2*t15*t52*(1.0/2.0)
+    t55 = p1*q1x*2.0
+    t56 = p2*t15*t26*(1.0/2.0)
+    t57 = p1*q1y*2.0
+    t58 = p2*t4*t15*t22
+
+    Hx = np.array([t2*t8*t15*3.0-t2*t8*t9*t16*3.0,t28,
+                   t31+t32+t2*t15*(t55-p2*q2x*2.0+p1*t17*2.0-rx*t3*2.0)*(1.0/2.0)+p1*t2*t15*t17-p1*t9*t16*t21*(3.0/2.0),
+                   t35,t30,t47,t28,t2*t8*t15-t2*t8*t13*t16*3.0,
+                   t33+t2*t15*(t57-p2*q2y*2.0+p1*t19*2.0-ry*t3*2.0)*(1.0/2.0)-p1*t2*t4*t16*t21*(3.0/2.0),
+                   t30,t41,t49,t31+t32-t9*t15+p1*t2*t15*t17*2.0-p1*t9*t16*t21*(3.0/2.0),
+                   t33-t2*t4*t15+p1*t2*t15*t19-p1*t2*t4*t16*t21*(3.0/2.0),
+                   t2*t15*(np.power(t17,2)*2.0+np.power(t19,2)*2.0)*(1.0/2.0)-t2*t16*np.power(t21,2)*(3.0/4.0)+t15*t17*t21,
+                   t38,t43,t54,t35,t30,t38,t2*t15*t39*3.0-t2*t9*t16*t39*3.0,t45,
+                   -t31+t56+t2*t15*(-t55+p2*q2x*2.0+p2*t22*2.0+rx*t3*2.0)*(1.0/2.0)+p2*t2*t15*t22-p2*t9*t16*t26*(3.0/2.0),
+                   t30,t41,t43,t45,
+                   t2*t15*t39-t2*t13*t16*t39*3.0,t58+t2*t15*(-t57+p2*q2y*2.0+p2*t24*2.0+ry*t3*2.0)*(1.0/2.0)-p2*t2*t4*t16*t26*(3.0/2.0),
+                   t47,t49,t54,
+                   -t31+t56+t9*t15+p2*t2*t15*t22*2.0-p2*t9*t16*t26*(3.0/2.0),
+                   t58+t2*t4*t15+p2*t2*t15*t24-p2*t2*t4*t16*t26*(3.0/2.0),
+                   t2*t15*(np.power(t22,2)*2.0+np.power(t24,2)*2.0)*(1.0/2.0)-t2*t16*np.power(t26,2)*(3.0/4.0)+t15*t22*t26]).T
+    return Hx
+
+def sy_hess(p1,p2,q1x,q1y,q2x,q2y,rx,ry):
+    t3 = p1-p2
+    t9 = p1*q1x
+    t10 = p2*q2x
+    t11 = rx*t3
+    t2 = -t9+t10+t11
+    t5 = p1*q1y
+    t6 = p2*q2y
+    t7 = ry*t3
+    t4 = -t5+t6+t7
+    t8 = np.power(p1,2)
+    t12 = np.power(t2,2)
+    t13 = np.power(t4,2)
+    t14 = t12+t13
+    t15 = 1.0/np.power(t14,1.5)
+    t16 = 1.0/np.power(t14,2.5)
+    t17 = q1x-rx
+    t18 = q1y-ry
+    t19 = q2x-rx
+    t20 = q2y-ry
+    t21 = t2*t8*t15
+    t22 = t21-t2*t8*t13*t16*3.0
+    t23 = t2*t17*2.0
+    t24 = t4*t18*2.0
+    t25 = t23+t24
+    t26 = p1*p2*t2*t13*t16*3.0
+    t36 = p1*p2*t2*t15
+    t27 = t26-t36
+    t28 = t2*t19*2.0
+    t29 = t4*t20*2.0
+    t30 = t28+t29
+    t31 = p1*t2*t15*t18
+    t32 = 1.0/np.sqrt(t14)
+    t33 = p1*t15*t25*(1.0/2.0)
+    t34 = p1*p2*t4*t12*t16*3.0
+    t35 = t34-p1*p2*t4*t15
+    t37 = p2*t2*t4*t16*t25*(3.0/2.0)
+    t38 = t37-p2*t2*t15*t18-p2*t4*t15*t17
+    t39 = np.power(p2,2)
+    t40 = p1*p2*t4*t13*t16*3.0
+    t41 = t40-p1*p2*t4*t15*3.0
+    t42 = p2*t13*t16*t25*(3.0/2.0)
+    t43 = t42-p2*t15*t25*(1.0/2.0)-p2*t4*t15*t18*2.0
+    t44 = t2*t15*t39
+    t45 = t44-t2*t13*t16*t39*3.0
+    t46 = p1*t2*t4*t16*t30*(3.0/2.0)
+    t47 = t46-p1*t2*t15*t20-p1*t4*t15*t19
+    t48 = p1*t13*t16*t30*(3.0/2.0)
+    t49 = t48-p1*t15*t30*(1.0/2.0)-p1*t4*t15*t20*2.0
+    t50 = t17*t19*2.0
+    t51 = t18*t20*2.0
+    t52 = t50+t51
+    t53 = t4*t16*t25*t30*(3.0/4.0)
+    t54 = t53-t15*t20*t25*(1.0/2.0)-t15*t18*t30*(1.0/2.0)-t4*t15*t52*(1.0/2.0)
+    t55 = p1*q1x*2.0
+    t56 = p2*t2*t15*t20
+    t57 = p1*q1y*2.0
+    t58 = p2*t15*t30*(1.0/2.0)
+    Hy = np.array([t4*t8*t15-t4*t8*t12*t16*3.0,t22,t31+t4*t15*(t55-p2*q2x*2.0+p1*t17*2.0-rx*t3*2.0)*(1.0/2.0)-p1*t2*t4*t16*t25*(3.0/2.0),
+                   t35,t27,t47,t22,
+                   t4*t8*t15*3.0-t4*t8*t13*t16*3.0,t32+t33+t4*t15*(t57-p2*q2y*2.0+p1*t18*2.0-ry*t3*2.0)*(1.0/2.0)+p1*t4*t15*t18-p1*t13*t16*t25*(3.0/2.0),
+                   t27,t41,t49,t31-t2*t4*t15+p1*t4*t15*t17-p1*t2*t4*t16*t25*(3.0/2.0),t32+t33-t13*t15+p1*t4*t15*t18*2.0-p1*t13*t16*t25*(3.0/2.0),
+                   t4*t15*(np.power(t17,2)*2.0+np.power(t18,2)*2.0)*(1.0/2.0)-t4*t16*np.power(t25,2)*(3.0/4.0)+t15*t18*t25,
+                   t38,t43,t54,t35,t27,t38,t4*t15*t39-t4*t12*t16*t39*3.0,t45,
+                   t56+t4*t15*(-t55+p2*q2x*2.0+p2*t19*2.0+rx*t3*2.0)*(1.0/2.0)-p2*t2*t4*t16*t30*(3.0/2.0),
+                   t27,t41,t43,t45,t4*t15*t39*3.0-t4*t13*t16*t39*3.0,
+                   -t32+t58+t4*t15*(-t57+p2*q2y*2.0+p2*t20*2.0+ry*t3*2.0)*(1.0/2.0)+p2*t4*t15*t20-p2*t13*t16*t30*(3.0/2.0),
+                   t47,t49,t54,t56+t2*t4*t15+p2*t4*t15*t19-p2*t2*t4*t16*t30*(3.0/2.0),
+                   -t32+t58+t13*t15+p2*t4*t15*t20*2.0-p2*t13*t16*t30*(3.0/2.0),t4*t15*(np.power(t19,2)*2.0+np.power(t20,2)*2.0)*(1.0/2.0)-t4*t16*np.power(t30,2)*(3.0/4.0)+t15*t20*t30]).T
+    return Hy
+
+def ry_hess():
+    Hy = np.array([0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0,0.0,0.0,0.0,0.0,-1.0,0.0]).reshape([6, 6])
+    return Hy
+
 class VMSI():
-    
+
     def __init__(self, vertices, cells, edges, width=500, height=500):
         self.vertices = vertices
         self.cells = cells
@@ -550,15 +703,15 @@ class VMSI():
 
     def transform(self, q, z, p):
         """
-        
+
         transform from points to CAP tiling
         via Equations 6 and 7
-        
+
         """
-        
+
         center = {alpha : {beta: None for beta in self.cells} for alpha in self.cells}
         radius = {alpha : {beta: None for beta in self.cells} for alpha in self.cells}
-        
+
         for (alpha, beta) in self.cell_pairs:
             center[alpha][beta] = (p[beta-1]*q[beta-1] - p[alpha-1]*q[alpha-1]) / (p[beta-1] - p[alpha-1])
             radius[alpha][beta] = np.sqrt(((p[alpha-1]*p[beta-1]) * (np.linalg.norm(q[alpha-1] - q[beta-1])**2))/(p[alpha-1] - p[beta-1])**2 \
@@ -774,7 +927,7 @@ class VMSI():
 
                 # This returns between [0, pi] so we should aways get a convex angle as expected
                 theta = np.arccos(np.divide(np.dot(r_centered[0,:], r_centered[1,:]),
-                                  np.multiply(np.linalg.norm(r_centered[0,:]), np.linalg.norm(r_centered[1,:]))))
+                                            np.multiply(np.linalg.norm(r_centered[0,:]), np.linalg.norm(r_centered[1,:]))))
                 if np.linalg.det(r_centered) < 0:
                     r_centered = r_centered[[1,0],:]
                 theta_range = np.linspace(0, theta, self.avg_edge_length)
@@ -853,109 +1006,253 @@ class VMSI():
 
         scale = 0.5 * (np.mean(np.linalg.norm(t1_0, axis=1)) + np.mean(np.linalg.norm(t2_0, axis=1)))
 
-        # Energy function
-        def energy(x):
-            x = x.reshape(x0.shape, order='F')
-            q = x[:,0:2]
-            p = x[:,2]
+        def load_hessian(h, Z):
+            pF = int(Z*(Z+1)/2)
+            delta = Z/2
+            rows = np.zeros(pF * self.dC.shape[0])
+            cols = np.zeros(pF * self.dC.shape[0])
+            vals = np.zeros(pF * self.dC.shape[0])
 
-            b = np.matmul(self.dC, np.multiply(q.T,p).T)
-            delta_p = np.matmul(self.dC, p)
+            n = 0
+            for i in range(Z):
+                for j in range(i,Z):
+                    I = n*self.dC.shape[0] + np.arange(0,self.dC.shape[0])
+                    rows[I] = I
 
-            t1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
-            t2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
+                    if i < Z/2:
+                        rows[I] = self.cell_pairs[:,0] + i*self.dC.shape[1]
+                    else:
+                        rows[I] = self.cell_pairs[:,1] + (i-delta)*self.dC.shape[1]
 
-            E = 0.5 * np.mean(np.power(np.sum(t1 * tau_1, axis=1), 2) +
-                              np.power(np.sum(t2 * tau_2, axis=1), 2))
-            return E
+                    if j < Z/2:
+                        cols[I] = self.cell_pairs[:,0] + j*self.dC.shape[1]
+                    else:
+                        cols[I] = self.cell_pairs[:,1] + (j-delta)*self.dC.shape[1]
 
-        def e_jac(x):
-            x = x.reshape(x0.shape, order='F')
-            q = x[:,0:2]
-            p = x[:,2]
+                    vals[I] = h[:,i,j]
+                    n += 1
 
-            b = np.matmul(self.dC, np.multiply(q.T,p).T)
-            delta_p = np.matmul(self.dC, p)
+            H = coo_matrix((vals[vals!=0], (rows[vals!=0],cols[vals!=0])), shape=(int(self.dC.shape[1]*Z/2),int(self.dC.shape[1]*Z/2)))
+            return H
 
-            t1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
-            t2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
+        class initial_problem():
+            def __init__(self, cell_pairs, dC):
+                self.cell_pairs = cell_pairs
+                self.dC = dC
 
-            ip1 = np.sum(t1 * tau_1, axis=1)
-            ip2 = np.sum(t2 * tau_2, axis=1)
+            def objective(self, x):
+                x = x.reshape(x0.shape, order='F')
+                q = x[:,0:2]
+                p = x[:,2]
 
-            drX1 = sx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
-            drX2 = sx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
-            drY1 = sy_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
-            drY2 = sy_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
+                b = np.matmul(self.dC, np.multiply(q.T,p).T)
+                delta_p = np.matmul(self.dC, p)
 
-            dE = np.multiply(ip1 * tau_1[:,0], drX1.T).T + np.multiply(ip1 * tau_1[:,1], drY1.T).T + \
-                 np.multiply(ip2 * tau_2[:,0], drX2.T).T + np.multiply(ip2 * tau_2[:,1], drY2.T).T
-            dE = dE / self.dC.shape[0]
+                t1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
+                t2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
 
-            rows = np.concatenate([self.cell_pairs[:,0],self.cell_pairs[:,0]+self.dC.shape[1],self.cell_pairs[:,0]+2*self.dC.shape[1],
-                                   self.cell_pairs[:,1],self.cell_pairs[:,1]+self.dC.shape[1],self.cell_pairs[:,1]+2*self.dC.shape[1]])
+                E = 0.5 * np.mean(np.power(np.sum(t1 * tau_1, axis=1), 2) +
+                                  np.power(np.sum(t2 * tau_2, axis=1), 2))
+                return E
 
-            dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
-            return dE
+            def gradient(self, x):
+                # Jacobian of objective
+                x = x.reshape(x0.shape, order='F')
+                q = x[:,0:2]
+                p = x[:,2]
 
-        # Define constraints and bounds
-        # nonlinear constraint
-        def nonlinear_con(x):
-            x = x.reshape(x0.shape, order='F')
-            q = x[:,0:2]
-            p = x[:,2]
+                b = np.matmul(self.dC, np.multiply(q.T,p).T)
+                delta_p = np.matmul(self.dC, p)
 
-            b = np.matmul(self.dC, np.multiply(q.T,p).T)
-            delta_p = np.matmul(self.dC, p)
+                t1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
+                t2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
 
-            l1 = np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)
-            l2 = np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)
+                ip1 = np.sum(t1 * tau_1, axis=1)
+                ip2 = np.sum(t2 * tau_2, axis=1)
 
-            E = 0.5*(np.mean(l1) + np.mean(l2)) - scale
-            return E
+                drX1 = sx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
+                drX2 = sx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
+                drY1 = sy_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
+                drY2 = sy_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
 
-        def nlc_jac(x):
-            x = x.reshape(x0.shape, order='F')
-            q = x[:,0:2]
-            p = x[:,2]
+                dE = np.multiply(ip1 * tau_1[:,0], drX1.T).T + np.multiply(ip1 * tau_1[:,1], drY1.T).T + \
+                     np.multiply(ip2 * tau_2[:,0], drX2.T).T + np.multiply(ip2 * tau_2[:,1], drY2.T).T
+                dE = dE / self.dC.shape[0]
 
-            b = np.matmul(self.dC, np.multiply(q.T,p).T)
-            delta_p = np.matmul(self.dC, p)
+                rows = np.concatenate([self.cell_pairs[:,0],self.cell_pairs[:,0]+self.dC.shape[1],self.cell_pairs[:,0]+2*self.dC.shape[1],
+                                       self.cell_pairs[:,1],self.cell_pairs[:,1]+self.dC.shape[1],self.cell_pairs[:,1]+2*self.dC.shape[1]])
 
-            t1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
-            t2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
+                dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
+                return dE
 
-            drX1 = rx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,1],0], r1[:,0])
-            drX2 = rx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,1],0], r2[:,0])
-            drY1 = ry_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],1], r1[:,1])
-            drY2 = ry_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],1], r2[:,1])
+            # Define constraints
+            def constraints(self, x):
+                # linear constraints
+                Aeq = np.concatenate((np.zeros(x0.shape[0]*2), np.ones(x0.shape[0])))
+                lincon = np.dot(Aeq, x)
+
+                # nonlinear constraint
+                x = x.reshape(x0.shape, order='F')
+                q = x[:,0:2]
+                p = x[:,2]
+
+                b = np.matmul(self.dC, np.multiply(q.T,p).T)
+                delta_p = np.matmul(self.dC, p)
+
+                l1 = np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)
+                l2 = np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)
+
+                nonlincon = 0.5*(np.mean(l1) + np.mean(l2)) - scale
+
+                cons = np.append(nonlincon, lincon)
+                return cons
+
+            def jacobian(self, x):
+                # Jacobian of constraints
+                x = x.reshape(x0.shape, order='F')
+                q = x[:,0:2]
+                p = x[:,2]
+
+                b = np.matmul(self.dC, np.multiply(q.T,p).T)
+                delta_p = np.matmul(self.dC, p)
+
+                t1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
+                t2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
+
+                drX1 = rx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,1],0], r1[:,0])
+                drX2 = rx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,1],0], r2[:,0])
+                drY1 = ry_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],1], r1[:,1])
+                drY2 = ry_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],1], r2[:,1])
 
 
-            dE = 0.5 * (np.multiply(t1[:,0],drX1.T).T + np.multiply(t1[:,1],drY1.T).T) + \
-                 0.5 * (np.multiply(t2[:,0],drX2.T).T + np.multiply(t2[:,1],drY2.T).T)
+                dE = 0.5 * (np.multiply(t1[:,0],drX1.T).T + np.multiply(t1[:,1],drY1.T).T) + \
+                     0.5 * (np.multiply(t2[:,0],drX2.T).T + np.multiply(t2[:,1],drY2.T).T)
 
-            rows = np.concatenate([self.cell_pairs[:,0],self.cell_pairs[:,0]+self.dC.shape[1],self.cell_pairs[:,0]+2*self.dC.shape[1],
-                                   self.cell_pairs[:,1],self.cell_pairs[:,1]+self.dC.shape[1],self.cell_pairs[:,1]+2*self.dC.shape[1]])
+                rows = np.concatenate([self.cell_pairs[:,0],self.cell_pairs[:,0]+self.dC.shape[1],self.cell_pairs[:,0]+2*self.dC.shape[1],
+                                       self.cell_pairs[:,1],self.cell_pairs[:,1]+self.dC.shape[1],self.cell_pairs[:,1]+2*self.dC.shape[1]])
 
-            dE = np.bincount(rows, weights=np.ravel(dE/self.dC.shape[0],order='F'))
-            return dE
+                dE = np.bincount(rows, weights=np.ravel(dE/self.dC.shape[0],order='F'))
+
+                # Add jacobian of linear constraints
+                lin_dE = np.concatenate((np.zeros(2*x0.shape[0]), np.ones(x0.shape[0])))
+
+                jac = np.concatenate([dE, lin_dE])
+                return jac
+
+            '''def hessian(self, x, lagrange, obj_factor):
+
+                lagrange = lagrange[0:-1]
+                x = x.reshape(x0.shape, order='F')
+                q = x[:,0:2]
+                p = x[:,2]
+
+                b = np.matmul(self.dC, np.multiply(q.T,p).T)
+                delta_p = np.matmul(self.dC, p)
+
+                b1 = np.divide((b - (np.multiply(r1.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r1.T,delta_p).T), axis=1)).T
+                b2 = np.divide((b - (np.multiply(r2.T,delta_p).T)).T,np.linalg.norm(b - (np.multiply(r2.T,delta_p).T), axis=1)).T
+
+                ip1 = np.sum(np.multiply(b1, tau_1), 1)
+                ip2 = np.sum(np.multiply(b2, tau_2), 1)
+
+                drX1 = sx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
+                drX2 = sx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
+                drY1 = sy_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
+                drY2 = sy_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
+
+                grad_e1 = np.multiply(tau_1[:,0], drX1.T).T + np.multiply(tau_1[:,1], drY1.T).T
+                grad_e2 = np.multiply(tau_2[:,0], drX2.T).T + np.multiply(tau_2[:,1], drY2.T).T
+
+                H_obj = np.multiply(grad_e1.T.reshape(6, 1, self.dC.shape[0]), grad_e1.T.reshape(1, 6, self.dC.shape[0])) + \
+                        np.multiply(grad_e2.T.reshape(6, 1, self.dC.shape[0]), grad_e2.T.reshape(1, 6, self.dC.shape[0]))
+
+                H_obj = np.transpose(H_obj, [2,0,1])
+
+                t1x = np.multiply(ip1, tau_1[:,0])
+                t1y = np.multiply(ip1, tau_1[:,1])
+                t2x = np.multiply(ip2, tau_2[:,0])
+                t2y = np.multiply(ip2, tau_2[:,1])
+
+                H1x = sx_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
+                H1y = sy_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r1[:,0], r1[:,1])
+                H2x = sx_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
+                H2y = sy_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], r2[:,0], r2[:,1])
+
+                H1x_obj = np.multiply(H1x.reshape(H1x.shape[0],6,6).T,t1x).T
+                H1y_obj = np.multiply(H1y.reshape(H1y.shape[0],6,6).T,t1y).T
+                H2x_obj = np.multiply(H2x.reshape(H2x.shape[0],6,6).T,t2x).T
+                H2y_obj = np.multiply(H2y.reshape(H2y.shape[0],6,6).T,t2y).T
+
+                H2nd = H1x_obj + H1y_obj + H2x_obj + H2y_obj
+
+                H_obj = (H_obj + H2nd)/self.dC.shape[0]
+                H_obj = H_obj * obj_factor
+
+                dRX1 = rx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,1],0], r1[:,0])
+                dRX2 = rx_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,1],0], r2[:,0])
+                dRY1 = ry_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],1], r1[:,1])
+                dRY2 = ry_grad(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],1], r2[:,1])
+
+                H_con = np.multiply(drX1.T.reshape([6, 1, self.dC.shape[0]]), dRX1.T.reshape([1, 6, self.dC.shape[0]])) + \
+                        np.multiply(drY1.T.reshape([6, 1, self.dC.shape[0]]), dRY1.T.reshape([1, 6, self.dC.shape[0]])) + \
+                        np.multiply(drX2.T.reshape([6, 1, self.dC.shape[0]]), dRX2.T.reshape([1, 6, self.dC.shape[0]])) + \
+                        np.multiply(drY2.T.reshape([6, 1, self.dC.shape[0]]), dRY2.T.reshape([1, 6, self.dC.shape[0]]))
+
+                H_con = np.multiply(np.transpose(H_con, [2,0,1]).T, lagrange).T
+
+                H_con2 = np.zeros([self.dC.shape[0],6,6])
+
+                H_con2[:,0,2] = b1[:,0]
+                H_con2[:,2,0] = b1[:,0]
+                H_con2[:,1,2] = b1[:,1]
+                H_con2[:,1,2] = b1[:,1]
+
+                H_con2[:,3,5] = -b2[:,0]
+                H_con2[:,5,3] = -b2[:,0]
+                H_con2[:,4,5] = -b2[:,1]
+                H_con2[:,5,4] = -b2[:,1]
+
+                H_con = np.divide((H_con + np.multiply(H_con2.T, lagrange).T), 2*self.dC.shape[0])
+
+                H = H_obj + H_con
+                H = load_hessian(H, 6)
+
+                H = H + H.T
+                row, col = self.hessianstructure()
+                return H[row, col]
+
+            def hessianstructure(self):
+                return np.nonzero(np.tril(np.ones((x0.size, x0.size))))'''
 
 
-        nonlincon = scipy.optimize.NonlinearConstraint(nonlinear_con, 0, 0, jac=nlc_jac)
+        initial_minimization = cyipopt.Problem(
+            n = x0.size,
+            m = 2,
+            problem_obj = initial_problem(self.cell_pairs,self.dC),
+            lb = np.concatenate((-np.inf*np.ones(x0.shape[0]), -np.inf*np.ones(x0.shape[0]), 0.001*np.ones(x0.shape[0]))),
+            ub = np.concatenate((np.inf*np.ones(x0.shape[0]), np.inf*np.ones(x0.shape[0]), 1000*np.ones(x0.shape[0]))),
+            cl = np.array([0, np.mean(p0)*p0.shape[0]]),
+            cu = np.array([0, np.mean(p0)*p0.shape[0]])
+        )
 
-        # linear constraint
-        Aeq = np.concatenate((np.zeros(x0.shape[0]*2), np.ones(x0.shape[0])))
-        lincon = scipy.optimize.LinearConstraint(Aeq, np.mean(p0)*p0.shape[0], np.mean(p0)*p0.shape[0])
+        q_scale_factor = 1/np.mean(x0[:,0:2])
 
-        constraints = [nonlincon, lincon]
+        initial_minimization.add_option('max_iter',2000)
+        initial_minimization.add_option('tol',1e-5)
+        initial_minimization.add_option('hsllib','/usr/local/lib/libcoinhsl.dylib')
+        initial_minimization.add_option('nlp_scaling_method','none')
+        #initial_minimization.add_option('linear_system_scaling','mc19')
+        initial_minimization.add_option('print_timing_statistics','yes')
+        initial_minimization.add_option('hessian_approximation','limited-memory')
+        initial_minimization.add_option('constr_viol_tol', 1e-6)
+        #initial_minimization.set_problem_scaling(x_scaling=np.concatenate((np.ones(q0.size), 1000*np.ones(p0.size))))
+        #initial_minimization.add_option('linear_solver','ma57')
 
-        bounds = scipy.optimize.Bounds(lb = np.concatenate((-np.inf*np.ones(x0.shape[0]), -np.inf*np.ones(x0.shape[0]), 0.001*np.ones(x0.shape[0]))),
-                                       ub = np.concatenate((np.inf*np.ones(x0.shape[0]), np.inf*np.ones(x0.shape[0]), 1000*np.ones(x0.shape[0]))))
+        res = initial_minimization.solve(x0.ravel(order='F'))
 
-        res = scipy.optimize.minimize(energy,np.ravel(x0, order='F'),jac=e_jac,method='trust-constr',bounds=bounds,
-                                   constraints=constraints,options={'maxiter':2000}, tol=1e-6)
-        x = res.x
+        x = res[0]
         x = x.reshape(x0.shape, order='F')
+        #x = np.genfromtxt('x_initial_test_python.csv',delimiter=',')
 
         q = x[:,0:2]
         p = x[:,2]
@@ -964,160 +1261,117 @@ class VMSI():
 
         theta0 = self.estimate_theta(x)
 
-        def theta_energy(theta):
-            dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-            dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
-            dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-            QL = np.sum(np.power(dQ, 2), axis=1)
 
-            rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
-            r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
-            r_sq[r_sq<0] = 0
+        class theta_problem():
+            def __init__(self, cell_pairs, dC, edgearc_x, edgearc_y):
+                self.cell_pairs = cell_pairs
+                self.dC = dC
+                self.edgearc_x = edgearc_x
+                self.edgearc_y = edgearc_y
 
-            r = np.sqrt(r_sq)
+            def theta_energy(self, theta):
+                dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
+                dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
+                dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
+                QL = np.sum(np.power(dQ, 2), axis=1)
 
-            delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
-            delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
+                rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
+                r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
+                r_sq[r_sq<0] = 0
 
-            dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
+                r = np.sqrt(r_sq)
 
-            E = 0.5 * np.mean(np.sum(np.power(np.subtract(dMag.T, r).T, 2), axis=1))
-            return E
+                delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
+                delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
 
-        def theta_e_jac(theta):
-            dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-            dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
-            dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-            QL = np.sum(np.power(dQ, 2), axis=1)
+                dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
 
-            rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
-            r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
-            ind_z = np.where(r_sq<0)
-            r_sq[ind_z] = 0
+                E = 0.5 * np.mean(np.sum(np.power(np.subtract(dMag.T, r).T, 2), axis=1))
+                return E
 
-            r = np.sqrt(r_sq)
+            def theta_e_jac(self, theta):
+                dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
+                dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
+                dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
+                QL = np.sum(np.power(dQ, 2), axis=1)
 
-            delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
-            delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
+                rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
+                r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
+                ind_z = r_sq<0
+                r_sq[ind_z] = 0
 
-            dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
-            d = np.subtract(dMag.T, r).T
+                r = np.sqrt(r_sq)
 
-            avg_d = np.sum(d, axis=1)
-            dR = radius_grad_theta(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], theta[self.cell_pairs[:,0]], theta[self.cell_pairs[:,1]])
-            dR[ind_z,:] = 0
+                delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
+                delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
 
-            dE = np.divide(-np.multiply(avg_d, dR.T).T,self.dC.shape[0])
-            rows = np.concatenate([self.cell_pairs[:,0], self.cell_pairs[:,1]])
+                dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
+                d = np.subtract(dMag.T, r).T
 
-            dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
-            return dE
+                avg_d = np.sum(d, axis=1)
+                dR = radius_grad_theta(p[self.cell_pairs[:,0]], p[self.cell_pairs[:,1]], q[self.cell_pairs[:,0],0], q[self.cell_pairs[:,0],1], q[self.cell_pairs[:,1],0], q[self.cell_pairs[:,1],1], theta[self.cell_pairs[:,0]], theta[self.cell_pairs[:,1]])
+                dR[ind_z,:] = 0
+
+                dE = np.divide(-np.multiply(avg_d, dR.T).T,self.dC.shape[0])
+                rows = np.concatenate([self.cell_pairs[:,0], self.cell_pairs[:,1]])
+
+                dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
+                return dE
+
+            def constraints(self, theta):
+                # linear constraints
+                Aeq = np.ones((1, len(self.involved_cells)))
+                eq_lincon = scipy.optimize.LinearConstraint(Aeq, 0, 0)
+
+                dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
+                dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
+                QL = np.sum(np.power(dQ, 2), axis=1)
+
+                A = np.multiply(dP, self.dC.T).T
+                b = p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL
+                ineq_lincon = scipy.optimize.LinearConstraint(A,-np.inf,b)
+
+
 
         if (theta_energy(np.zeros_like(theta0)) < theta_energy(theta0)):
             theta0 = np.zeros_like(theta0)
 
-        # linear constraints
-        Aeq = np.ones((1, len(self.involved_cells)))
-        eq_lincon = scipy.optimize.LinearConstraint(Aeq, 0, 0)
-
-        dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-        dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-        QL = np.sum(np.power(dQ, 2), axis=1)
-
-        A = np.multiply(dP, self.dC.T).T
-        b = p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL
-        ineq_lincon = scipy.optimize.LinearConstraint(A,-np.inf,b)
 
         constraints = [eq_lincon, ineq_lincon]
 
-        res = scipy.optimize.minimize(theta_energy,theta0,jac=theta_e_jac,method='trust-constr',
-                                        constraints=constraints,options={'maxiter':2000}, tol=1e-6)
-        theta = res.x
-        return x, theta
+        #res = scipy.optimize.minimize(theta_energy,theta0,jac=theta_e_jac,method='trust-constr',
+        #                                constraints=constraints,options={'maxiter':2000}, tol=1e-6)
+        #theta = res.x
 
-    
+        theta=np.genfromtxt('theta.csv',delimiter=',')
+        return q, p, theta
+
+
     def fit(self):
-        
+
         """
-        
+
         Perform the minimization of equation 5 with respect to the variables (q, z, p)
-        
+
         """
         self.prepare_data()
 
         print("Initial minimization")
         # Perform initial minimization for p, q and theta
-        x0, theta0 = self.initial_minimization()
-        X0 = np.vstack([x0.T, theta0]).T
+        q0, p0, theta0 = self.initial_minimization()
+        #X0 = np.vstack([q0.T, theta0, p0]).T
+        X0 = np.genfromtxt('X0_python.csv',delimiter=',')
+
+        # Calculate scaling factors for parameters
+        var_scaling = np.divide(1, np.concatenate([np.mean(X0[:,0:2])*np.ones(2*self.dC.shape[1]),
+                                                   np.mean(np.abs(X0[:,2]))*np.ones(self.dC.shape[1]),
+                                                   np.mean(np.abs(X0[:,3]))*np.ones(self.dC.shape[1])]))
+
+        q0 = X0[:,0:2]
+        theta0 = X0[:,2]
+        p0 = X0[:,3]
 
         print("Main minimization")
-
-        def energy(X):
-            X = X.reshape(X0.shape, order='F')
-
-            q = X[:,0:2]
-            p = X[:,2]
-            theta = X[:,3]
-
-            dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-            dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
-            dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-            QL = np.sum(np.power(dQ, 2), axis=1)
-
-            rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
-            r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
-            r_sq[r_sq < 0] = 0
-
-            r = np.sqrt(r_sq)
-
-            delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
-            delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
-
-            dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
-
-            E = 0.5 * np.mean(np.sum(np.power(np.subtract(dMag.T, r).T, 2), axis=1))
-            return E
-
-        def e_jac(X):
-            X = X.reshape(X0.shape, order='F')
-
-            q = X[:,0:2]
-            p = X[:,2]
-            theta = X[:,3]
-
-            dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-            dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
-            dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-            QL = np.sum(np.power(dQ, 2), axis=1)
-
-            rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
-            r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
-            ind_z = np.where(r_sq<=0)
-            r_sq[ind_z] = 0
-
-            r = np.sqrt(r_sq)
-
-            delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
-            delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
-
-            dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
-            d = np.subtract(dMag.T, r).T
-
-            dRhoX = rho_x_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,1],0])
-            dRhoY = rho_y_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],1])
-            dR = radius_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1],theta[self.cell_pairs[:,0]],theta[self.cell_pairs[:,1]])
-
-            dNormX = np.sum(np.multiply(delta_x,np.divide(d, dMag)),axis=1)
-            dNormY = np.sum(np.multiply(delta_y,np.divide(d, dMag)),axis=1)
-
-            avg_d = np.sum(d, axis=1)
-            dR[ind_z] = 0
-
-            dE = np.divide(np.multiply(dNormX, dRhoX.T).T+np.multiply(dNormY, dRhoY.T).T-np.multiply(avg_d, dR.T).T,self.dC.shape[0])
-            rows = np.concatenate([self.cell_pairs[:,0],self.cell_pairs[:,0]+self.dC.shape[1],self.cell_pairs[:,0]+2*self.dC.shape[1],self.cell_pairs[:,0]+3*self.dC.shape[1],
-                                   self.cell_pairs[:,1],self.cell_pairs[:,1]+self.dC.shape[1],self.cell_pairs[:,1]+2*self.dC.shape[1],self.cell_pairs[:,1]+3*self.dC.shape[1]])
-            dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
-            return dE
 
         def load_hessian(h):
             # It looks like Z should always be constant
@@ -1150,196 +1404,275 @@ class VMSI():
             H = coo_matrix((vals[vals!=0], (rows[vals!=0],cols[vals!=0])), shape=(int(self.dC.shape[1]*Z/2),int(self.dC.shape[1]*Z/2)))
             return H
 
-        def e_hess(X):
-            X = X.reshape(X0.shape, order='F')
+        # Define cyipopt problem
 
-            q = X[:,0:2]
-            p = X[:,2]
-            theta = X[:,3]
+        class problem():
+            def __init__(self, cell_pairs, dC, edgearc_x, edgearc_y, avg_edge_length):
+                self.cell_pairs = cell_pairs
+                self.dC = dC
+                self.edgearc_x = edgearc_x
+                self.edgearc_y = edgearc_y
+                self.avg_edge_length = avg_edge_length
 
-            dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-            dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
-            dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-            QL = np.sum(np.power(dQ, 2), axis=1)
+            def objective(self, X):
+                X = X.reshape(X0.shape, order='F')
 
-            rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
-            r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
-            ind_z = np.where(r_sq<=0)
-            nind_z = np.where(r_sq>0)
-            r_sq[ind_z] = 0
+                q = X[:,0:2]
+                p = X[:,3]
+                theta = X[:,2]
 
-            r = np.sqrt(r_sq)
+                dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
+                dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
+                dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
+                QL = np.sum(np.power(dQ, 2), axis=1)
 
-            delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
-            delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
+                rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
+                r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
+                r_sq[r_sq < 0] = 0
 
-            dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
-            delta_x = np.divide(delta_x, dMag)
-            delta_y = np.divide(delta_y, dMag)
+                r = np.sqrt(r_sq)
 
-            d = np.subtract(dMag.T, r).T
+                delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
+                delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
 
-            dRhoX = rho_x_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,1],0])
-            dRhoY = rho_y_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],1])
-            dR = radius_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1],theta[self.cell_pairs[:,0]],theta[self.cell_pairs[:,1]])
-            dR[ind_z] = 0
+                dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
 
-            r_ratio = np.divide(r, dMag.T).T
+                E = 0.5 * np.mean(np.sum(np.power(np.subtract(dMag.T, r).T, 2), axis=1))
+                return E
 
-            dNormXX = np.sum(np.multiply(r_ratio,np.multiply(delta_x,delta_x)),axis=1)
-            dNormXY = np.sum(np.multiply(r_ratio,np.multiply(delta_x,delta_y)),axis=1)
-            dNormYY = np.sum(np.multiply(r_ratio,np.multiply(delta_y,delta_y)),axis=1)
+            def gradient(self, X):
+                # Return jacobian of objective function
+                X = X.reshape(X0.shape, order='F')
 
-            dRhoX = dRhoX.reshape(1,dRhoX.shape[0],dRhoX.shape[1])
-            dRhoY = dRhoY.reshape(1,dRhoY.shape[0],dRhoY.shape[1])
-            dR = dR.reshape(1,dR.shape[0],dR.shape[1])
+                q = X[:,0:2]
+                p = X[:,3]
+                theta = X[:,2]
 
-            dRhoXT = np.transpose(dRhoX, (2,0,1))
-            dRhoYT = np.transpose(dRhoY, (2,0,1))
-            dRT = np.transpose(dR, (2,0,1))
+                dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
+                dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
+                dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
+                QL = np.sum(np.power(dQ, 2), axis=1)
 
-            H = np.multiply(dRhoXT, np.transpose(np.multiply(dNormXX, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) + \
-                np.multiply(dRhoXT, np.transpose(np.multiply(dNormXY, np.transpose(dRhoY, (1,0,2)).T),(1,0,2))) + \
-                np.multiply(dRhoYT, np.transpose(np.multiply(dNormXY, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) + \
-                np.multiply(dRhoYT, np.transpose(np.multiply(dNormYY, np.transpose(dRhoY, (1,0,2)).T),(1,0,2)))
+                rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
+                r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
+                ind_z = r_sq<=0
+                r_sq[ind_z] = 0
 
-            dNormX = np.sum(delta_x, axis=1)[nind_z]
-            dNormY = np.sum(delta_y, axis=1)[nind_z]
+                r = np.sqrt(r_sq)
 
-            H = H - np.multiply(dRT, np.transpose(np.multiply(dNormX, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) - \
-                np.multiply(dRT, np.transpose(np.multiply(dNormY, np.transpose(dRhoY, (1,0,2)).T),(1,0,2))) - \
-                np.multiply(dRhoXT, np.transpose(np.multiply(dNormX, np.transpose(dR, (1,0,2)).T),(1,0,2))) - \
-                np.multiply(dRhoYT, np.transpose(np.multiply(dNormY, np.transpose(dR, (1,0,2)).T),(1,0,2)))
+                delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
+                delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
 
-            nPix = (np.ones(self.dC.shape[0])*self.avg_edge_length)[nind_z]
-            H = H + np.multiply(dRT, np.transpose(np.multiply(nPix, np.transpose(dR, (1,0,2)).T),(1,0,2)))
+                dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
+                d = np.subtract(dMag.T, r).T
 
-            avg_ratio = np.sum(np.divide(d, dMag),axis=1)
-            H = H + np.multiply(dRhoXT, np.transpose(np.multiply(avg_ratio, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) + \
-                np.multiply(dRhoYT, np.transpose(np.multiply(avg_ratio, np.transpose(dRhoY, (1,0,2)).T),(1,0,2)))
-            H = np.divide(np.transpose(H, (2,0,1)),self.dC.shape[0])
+                dRhoX = rho_x_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,1],0])
+                dRhoY = rho_y_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],1])
+                dR = radius_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1],theta[self.cell_pairs[:,0]],theta[self.cell_pairs[:,1]])
 
-            H = load_hessian(H)
-            H = H + H.T
-            return H
+                dNormX = np.sum(np.multiply(delta_x,np.divide(d, dMag)),axis=1)
+                dNormY = np.sum(np.multiply(delta_y,np.divide(d, dMag)),axis=1)
+
+                avg_d = np.sum(d, axis=1)
+                dR[ind_z] = 0
+
+                dE = np.divide(np.multiply(dNormX, dRhoX.T).T+np.multiply(dNormY, dRhoY.T).T-np.multiply(avg_d, dR.T).T,self.dC.shape[0])
+                rows = np.concatenate([self.cell_pairs[:,0],self.cell_pairs[:,0]+self.dC.shape[1],self.cell_pairs[:,0]+2*self.dC.shape[1],self.cell_pairs[:,0]+3*self.dC.shape[1],
+                                       self.cell_pairs[:,1],self.cell_pairs[:,1]+self.dC.shape[1],self.cell_pairs[:,1]+2*self.dC.shape[1],self.cell_pairs[:,1]+3*self.dC.shape[1]])
+                dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
+                return dE.ravel()
+
+            def constraints(self, X):
+                # Linear constraints
+                Aeq = np.vstack((np.concatenate((np.zeros(3*theta0.shape[0]), np.ones(theta0.shape[0])/theta0.shape[0])),
+                                 np.concatenate((np.zeros(2*theta0.shape[0]), np.ones(theta0.shape[0])/theta0.shape[0], np.zeros(theta0.shape[0])))))
+                lc = np.dot(Aeq, X)
+                # Nonlinear constraints
+                X = X.reshape(X0.shape, order='F')
+
+                q = X[:,0:2]
+                p = X[:,3]
+                theta = X[:,2]
+
+                nlc = (np.matmul(self.dC,p) * np.matmul(self.dC, theta)) - (p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * np.sum(np.power(np.matmul(self.dC, q), 2), axis=1))
+                constraints = np.concatenate([nlc, lc])
+                return constraints
+
+            def jacobian(self, X):
+                # Return jacobian of constraints
+                X = X.reshape(X0.shape, order='F')
+
+                q = X[:,0:2]
+                p = X[:,3]
+                theta = X[:,2]
+
+                # Calculate jacobian of nonlinear constraints
+                dP = np.matmul(self.dC,p)
+                dT = np.matmul(self.dC, theta)
+                dQ = np.matmul(self.dC, q)
+                QL = np.sum(np.power(dQ, 2), axis=1)
+
+                gX = np.multiply(self.dC.T, -2*p[self.cell_pairs[:,0]]*p[self.cell_pairs[:,1]]*dQ[:,0]).T
+                gY = np.multiply(self.dC.T, -2*p[self.cell_pairs[:,0]]*p[self.cell_pairs[:,1]]*dQ[:,1]).T
+                gTh = np.multiply(self.dC.T, dP).T
+                gP = np.multiply(self.dC.T, dT).T - np.divide(np.multiply(QL*p[self.cell_pairs[:,0]]*p[self.cell_pairs[:,1]],np.abs(self.dC).T).T,p)
+                dE = np.hstack([gX,gY,gTh,gP])
+
+                # Calculate jacobian of linear constraints
+                jac = np.vstack((dE,
+                                 np.concatenate((np.zeros(3*self.dC.shape[1]), np.ones(self.dC.shape[1])/self.dC.shape[1])),
+                                 np.concatenate((np.zeros(2*self.dC.shape[1]), np.ones(self.dC.shape[1])/self.dC.shape[1], np.zeros(self.dC.shape[1])))))
+                return jac.ravel()
+
+            def hessian(self, X, lagrange, obj_factor):
+                X = X.reshape(X0.shape, order='F')
+
+                q = X[:,0:2]
+                p = X[:,3]
+                theta = X[:,2]
+
+                dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
+                dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
+                dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
+                QL = np.sum(np.power(dQ, 2), axis=1)
+
+                rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
+                r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
+                ind_z = r_sq<=0
+                r_sq[ind_z] = 0
+
+                r = np.sqrt(r_sq)
+
+                delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
+                delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
+
+                dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
+                delta_x = np.divide(delta_x, dMag)
+                delta_y = np.divide(delta_y, dMag)
+
+                d = np.subtract(dMag.T, r).T
+
+                dRhoX = rho_x_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,1],0])
+                dRhoY = rho_y_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],1])
+                dR = radius_grad(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1],theta[self.cell_pairs[:,0]],theta[self.cell_pairs[:,1]])
+                dR[ind_z] = 0
+
+                r_ratio = np.divide(r, dMag.T).T
+
+                dNormXX = np.sum(np.multiply(r_ratio,np.multiply(delta_x,delta_x)),axis=1)
+                dNormXY = np.sum(np.multiply(r_ratio,np.multiply(delta_x,delta_y)),axis=1)
+                dNormYY = np.sum(np.multiply(r_ratio,np.multiply(delta_y,delta_y)),axis=1)
+
+                dRhoX = dRhoX.reshape(1,dRhoX.shape[0],dRhoX.shape[1])
+                dRhoY = dRhoY.reshape(1,dRhoY.shape[0],dRhoY.shape[1])
+                dR = dR.reshape(1,dR.shape[0],dR.shape[1])
+
+                dRhoXT = np.transpose(dRhoX, (2,0,1))
+                dRhoYT = np.transpose(dRhoY, (2,0,1))
+                dRT = np.transpose(dR, (2,0,1))
+
+                H = np.multiply(dRhoXT, np.transpose(np.multiply(dNormXX, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) + \
+                    np.multiply(dRhoXT, np.transpose(np.multiply(dNormXY, np.transpose(dRhoY, (1,0,2)).T),(1,0,2))) + \
+                    np.multiply(dRhoYT, np.transpose(np.multiply(dNormXY, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) + \
+                    np.multiply(dRhoYT, np.transpose(np.multiply(dNormYY, np.transpose(dRhoY, (1,0,2)).T),(1,0,2)))
+
+                dNormX = np.multiply(np.invert(ind_z),np.sum(delta_x, axis=1))
+                dNormY = np.multiply(np.invert(ind_z),np.sum(delta_y, axis=1))
+
+                H = H - np.multiply(dRT, np.transpose(np.multiply(dNormX, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) - \
+                    np.multiply(dRT, np.transpose(np.multiply(dNormY, np.transpose(dRhoY, (1,0,2)).T),(1,0,2))) - \
+                    np.multiply(dRhoXT, np.transpose(np.multiply(dNormX, np.transpose(dR, (1,0,2)).T),(1,0,2))) - \
+                    np.multiply(dRhoYT, np.transpose(np.multiply(dNormY, np.transpose(dR, (1,0,2)).T),(1,0,2)))
+
+                nPix = np.multiply(np.invert(ind_z),np.ones(self.dC.shape[0])*self.avg_edge_length)
+                H = H + np.multiply(dRT, np.transpose(np.multiply(nPix, np.transpose(dR, (1,0,2)).T),(1,0,2)))
+
+                avg_ratio = np.sum(np.divide(d, dMag),axis=1)
+                H = H + np.multiply(dRhoXT, np.transpose(np.multiply(avg_ratio, np.transpose(dRhoX, (1,0,2)).T),(1,0,2))) + \
+                    np.multiply(dRhoYT, np.transpose(np.multiply(avg_ratio, np.transpose(dRhoY, (1,0,2)).T),(1,0,2)))
+                H = np.divide(np.transpose(H, (2,0,1)),self.dC.shape[0])
+
+                # Constraint hessian
+                lagrange = lagrange[0:-2]
+
+                dNormX = np.divide(np.sum(np.multiply(delta_x, d),axis=1),self.dC.shape[0])
+                dNormY = np.divide(np.sum(np.multiply(delta_y, d),axis=1),self.dC.shape[0])
+                d_avg = np.divide(np.multiply(np.invert(ind_z),np.sum(d, axis=1)),self.dC.shape[0])
+
+                hRhoX = rho_x_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,1],0])
+                hRhoY = rho_y_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],1])
+                hR = radius_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1],theta[self.cell_pairs[:,0]],theta[self.cell_pairs[:,1]])
+                hCon = const_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1])
+
+                hR[ind_z] = 0
+
+                hRhoX = hRhoX.reshape(hRhoX.shape[0],8,8)
+                hRhoY = hRhoY.reshape(hRhoY.shape[0],8,8)
+                hR = hR.reshape(hR.shape[0],8,8)
+                hCon = hCon.reshape(hCon.shape[0],8,8)
+
+                H_obj = H + np.multiply(hRhoX.T, dNormX).T + np.multiply(hRhoY.T, dNormY).T - \
+                        np.multiply(hR.T, d_avg).T
+
+                H_con = np.multiply(hCon.T, lagrange).T
+                H_obj = np.multiply(H_obj, obj_factor)
+
+                H_obj = load_hessian(H_obj)
+                H_con = load_hessian(H_con)
+
+                H = H_obj + H_con
+                H = H.toarray()
+                H = H + H.T
+                row, col = self.hessianstructure()
+                return H[row, col]
+
+            def hessianstructure(self):
+                return np.nonzero(np.tril(np.ones((X0.size, X0.size))))
 
 
-        def nonlinear_con(X):
-            X = X.reshape(X0.shape, order='F')
+        main_minimization = cyipopt.Problem(
+            n = X0.size,
+            m = self.cell_pairs.shape[0] + 2,
+            problem_obj = problem(self.cell_pairs,self.dC,self.edgearc_x,self.edgearc_y,self.avg_edge_length),
+            lb = np.concatenate((-np.inf*np.ones(3*theta0.shape[0]), 0.001*np.ones(theta0.shape[0]))),
+            ub = np.concatenate((np.inf*np.ones(3*theta0.shape[0]), 1000*np.ones(theta0.shape[0]))),
+            cl = np.concatenate((-np.inf*np.ones(self.dC.shape[0]), np.array([np.mean(X0[:,3])]), np.array([np.mean(X0[:,2])]))),
+            cu = np.concatenate((np.zeros(self.dC.shape[0]), np.array([np.mean(X0[:,3])]), np.array([np.mean(X0[:,2])])))
+        )
 
-            q = X[:,0:2]
-            p = X[:,2]
-            theta = X[:,3]
+        main_minimization.add_option('max_iter',2000)
+        main_minimization.add_option('tol',1e-6)
+        main_minimization.add_option('nlp_scaling_method','none')
+        main_minimization.add_option('print_timing_statistics','yes')
+        #main_minimization.add_option('mumps_pivtol',0.99)
+        #main_minimization.add_option('mumps_pivtolmax',0.99)
 
-            return (np.matmul(self.dC,p) * np.matmul(self.dC, theta)) - (p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * np.sum(np.power(np.matmul(self.dC, q), 2), axis=1))
+        #main_minimization.add_option('derivative_test','only-second-order')
+        #main_minimization.add_option('hsllib','/usr/local/lib/libcoinhsl.dylib')
+        #main_minimization.add_option('linear_solver','ma86')
+        #main_minimization.add_option('ma57_automatic_scaling','no')
 
-        def nlc_jac(X):
-            X = X.reshape(X0.shape, order='F')
+        res = main_minimization.solve(X0.ravel(order='F'))
 
-            q = X[:,0:2]
-            p = X[:,2]
-            theta = X[:,3]
-
-            dP = np.matmul(self.dC,p)
-            dT = np.matmul(self.dC, theta)
-            dQ = np.matmul(self.dC, q)
-            QL = np.sum(np.power(dQ, 2), axis=1)
-
-            gX = np.multiply(self.dC.T, -2*p[self.cell_pairs[:,0]]*p[self.cell_pairs[:,1]]*dQ[:,0]).T
-            gY = np.multiply(self.dC.T, -2*p[self.cell_pairs[:,0]]*p[self.cell_pairs[:,1]]*dQ[:,1]).T
-            gTh = np.multiply(self.dC.T, dP).T
-            gP = np.multiply(self.dC.T, dT).T - np.divide(np.multiply(QL*p[self.cell_pairs[:,0]]*p[self.cell_pairs[:,1]],np.abs(self.dC).T).T,p)
-            dE = np.array([gX,gY,gP,gTh]).T
-            return dE
-
-        def nlc_hess(X, v):
-            """
-            :param X: values
-            :param v: ndarray containing lagrange multipliers
-            :return: hessian
-            """
-
-            X = X.reshape(X0.shape, order='F')
-
-            q = X[:,0:2]
-            p = X[:,2]
-            theta = X[:,3]
-
-            dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
-            dT = theta[self.cell_pairs[:,0]] - theta[self.cell_pairs[:,1]]
-            dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
-            QL = np.sum(np.power(dQ, 2), axis=1)
-
-            rho = np.divide(np.matmul(self.dC,np.multiply(p, q.T).T).T, dP).T
-            r_sq = np.divide(((p[self.cell_pairs[:,0]] * p[self.cell_pairs[:,1]] * QL) - (dP * dT)),np.power(dP, 2))
-            ind_z = np.where(r_sq<=0)
-            nind_z = np.where(r_sq>0)
-            r_sq[ind_z] = 0
-
-            r = np.sqrt(r_sq)
-
-            delta_x = np.subtract(rho[:,0],self.edgearc_x.T).T
-            delta_y = np.subtract(rho[:,1],self.edgearc_y.T).T
-
-            dMag = np.sqrt(np.power(delta_x, 2) + np.power(delta_y, 2))
-            delta_x = np.divide(delta_x, dMag)
-            delta_y = np.divide(delta_y, dMag)
-
-            d = np.subtract(dMag.T, r).T
-
-            dNormX = np.sum(np.multiply(delta_x, d),axis=1)
-            dNormY = np.sum(np.multiply(delta_y, d),axis=1)
-            d_avg = np.sum(d, axis=1)[nind_z]
-
-            hRhoX = rho_x_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,1],0])
-            hRhoY = rho_y_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],1])
-            hR = radius_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1],theta[self.cell_pairs[:,0]],theta[self.cell_pairs[:,1]])
-            hCon = const_hess(p[self.cell_pairs[:,0]],p[self.cell_pairs[:,1]],q[self.cell_pairs[:,0],0],q[self.cell_pairs[:,0],1],q[self.cell_pairs[:,1],0],q[self.cell_pairs[:,1],1])
-
-            hRhoX = hRhoX.reshape(hRhoX.shape[0],8,8)
-            hRhoY = hRhoY.reshape(hRhoY.shape[0],8,8)
-            hR = hR.reshape(hR.shape[0],8,8)
-            hCon = hCon.reshape(hCon.shape[0],8,8)
-
-            H = np.multiply(hRhoX.T, dNormX).T + np.multiply(hRhoY.T, dNormY).T - \
-                np.multiply(hR.T, d_avg).T + np.multiply(hCon.T, v).T
-
-            H = load_hessian(H)
-            H = H + H.T
-            return H
-
-        nonlincon = scipy.optimize.NonlinearConstraint(nonlinear_con,lb=-np.inf,ub=0,jac=nlc_jac,hess=nlc_hess)
-
-        Aeq = np.vstack((np.concatenate((np.zeros(2*theta0.shape[0]), np.ones(theta0.shape[0])/theta0.shape[0], np.zeros(theta0.shape[0]))),
-                         np.concatenate((np.zeros(3*theta0.shape[0]), np.ones(theta0.shape[0])/theta0.shape[0]))))
-        beq = np.array([np.mean(X0[:,2]), np.mean(X0[:,3])])
-        lincon = scipy.optimize.LinearConstraint(Aeq, lb=beq, ub=beq)
-
-        constraints= [nonlincon, lincon]
-        bounds = scipy.optimize.Bounds(lb=np.concatenate((-np.inf*np.ones(2*theta0.shape[0]), 0.001*np.ones(theta0.shape[0]), -np.inf*np.ones(theta0.shape[0]))),
-                                       ub=np.concatenate((np.inf*np.ones(2*theta0.shape[0]), 1000*np.ones(theta0.shape[0]), np.inf*np.ones(theta0.shape[0]))))
-
-        res = scipy.optimize.minimize(energy,np.ravel(X0,order='F'),jac=e_jac,hess=e_hess,method='trust-constr',constraints=constraints,
-                                      bounds=bounds,options={'maxiter':2000}, tol=1e-6)
-        X = res.x
+        X = res[0]
         X = X.reshape(X0.shape, order='F')
 
         q = X[:,0:2]
-        p = X[:,2]
-        theta = X[:,3]
+        p = X[:,3]
+        theta = X[:,2]
 
         # compute the tensions
-        self.get_tensions(q, p, theta)
-        
-        return q, z, p
+        T = self.get_tensions(q, p, theta)
+
+        return q, theta, p
 
 
     def get_tensions(self, q, p, theta):
-        
+
         """
-        
+
         applies the Young-Laplace law to obtain the tensions at every edge
-        
+
         """
         T = np.matmul(self.dC, q)
         T = np.sum(np.power(T, 2), axis=1)
@@ -1348,16 +1681,16 @@ class VMSI():
         T = np.sqrt(T)
         return T
 
-        
+
     def get_normalized_tensions(self):
         """
-        
+
         normalize the tensions between 0 and 1. Used for plotting in the CAP tiling
-        
+
         """
         tensions_normalized = {alpha: {beta: None for beta in self.cells} for alpha in self.cells}
         min_T = np.inf ; max_T = -np.inf
-        
+
         for (alpha, beta) in self.cell_pairs:
             if alpha not in self.edge_cells or beta not in self.edge_cells:
                 if self.tension[alpha][beta] > max_T: max_T = self.tension[alpha][beta]
@@ -1367,23 +1700,23 @@ class VMSI():
                 tensions_normalized[alpha][beta] = (self.tension[alpha][beta] - min_T) / (max_T - min_T)
                 tensions_normalized[beta][alpha] = -1 * tensions_normalized[alpha][beta]
         return tensions_normalized
-            
+
     def CAP(self, img, q, z, p, linewidth=2, endpoint_size=5):
-        
+
         """
-        
-        Takes the generating points determined by the minimization, 
-        finds the corresponding (center, radius) pairs for each edge, 
+
+        Takes the generating points determined by the minimization,
+        finds the corresponding (center, radius) pairs for each edge,
         and plots the resuling cirles between the first and last elements in each edge
-        
+
         """
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-        center, radius = self.transform(q, z, p) 
-        
+        center, radius = self.transform(q, z, p)
+
         # normalize the tensions (to see the differences when plotting the colors)
         tensions_normalized = self.get_normalized_tensions()
 
-        for (alpha, beta) in self.cell_pairs: 
+        for (alpha, beta) in self.cell_pairs:
             if alpha not in self.edge_cells or beta not in self.edge_cells:
                 # get the tension in the edge
                 T = tensions_normalized[alpha][beta]
@@ -1419,15 +1752,15 @@ class VMSI():
                 # plot the generating points
                 #img = cv2.circle(img, (int(q[alpha-1][1]), int(q[alpha-1][0])), 3, (1, 1, 1), -1)
                 #img = cv2.circle(img, (int(q[beta-1][1]), int(q[beta-1][0])), 3, (1, 1, 1), -1)
-        
+
         return img
-        
+
 def get_actual(model, seg, dtr, generating_points):
-    actual_model = VMSI(cell_pairs = seg.pairs(), edges = seg.edges(), num_cells = len(seg.cells[0]), 
-             cells = seg.cells[0], edge_cells = seg.get_edge_cells(), barycenters = seg.barycenters[0], height=256, width=256)
+    actual_model = VMSI(cell_pairs = seg.pairs(), edges = seg.edges(), num_cells = len(seg.cells[0]),
+                        cells = seg.cells[0], edge_cells = seg.get_edge_cells(), barycenters = seg.barycenters[0], height=256, width=256)
     q, z, p = actual_model.extract_values(model.initialize_points())
     actual_model.get_tensions(q, z, p)
-    
+
     # get the actual q, z, and p by finding the closest points that were used to generate the image
     q_actual = []
     z_actual = []
@@ -1446,18 +1779,18 @@ def get_actual(model, seg, dtr, generating_points):
     q_actual = np.array(q_actual)
     z_actual = np.array(z_actual)
     p_actual = np.array(p_actual)
-    
+
     img = actual_model.CAP(dtr.transform.copy(), q_actual, z_actual, p_actual)
-   
+
     plt.figure(figsize=(15, 10))
     plt.imshow(img)
     plt.show()
-    
+
     return actual_model
-    
+
 def evaluate(model, seg, dtr, generating_points):
     actual_model = get_actual(model, seg, dtr, generating_points)
-    
+
     predicted = model.tension
     actual = actual_model.tension
 
@@ -1468,7 +1801,7 @@ def evaluate(model, seg, dtr, generating_points):
             try:
                 pred = abs(predicted[alpha][beta])
                 actual = abs(actual[alpha][beta])
-                
+
                 x_points.append(pred)
                 y_points.append(actual)
             except:

@@ -21,7 +21,7 @@ class Segmenter:
         self.cells = []
         self.borders = []
         self.adjacent_cells = []
-        self.barrycenters = []
+        self.barycenters = []
     
     def closest_nonzero(self, img, pt):
         """
@@ -78,7 +78,7 @@ class Segmenter:
             for point in zeros:
                 new_img[point[0], point[1]] = self.closest_nonzero(self.masks[i], point)
             
-            # fix the mask ordering --> order according to the distance of the cells' barrycenters from the origin
+            # fix the mask ordering --> order according to the distance of the cells' barycenters from the origin
             self.masks[i] = new_img.copy() 
                         
             cells = np.unique(new_img)
@@ -92,16 +92,16 @@ class Segmenter:
             for j in range(len(sorted_norm_args)):
                 self.masks[i][np.where(new_img == sorted_norm_args[j] + 1)] = j + 1              
     
-    def compute_barrycenters(self, i=0):
+    def compute_barycenters(self, i=0):
         # initialize
-        if len(self.barrycenters) == 0:
-            self.barrycenters = [None for i in range(self.N)]
-        if self.barrycenters[i] == None:
-            self.barrycenters[i] = {alpha:None for alpha in self.cells[i]}
+        if len(self.barycenters) == 0:
+            self.barycenters = [None for i in range(self.N)]
+        if self.barycenters[i] == None:
+            self.barycenters[i] = {alpha:None for alpha in self.cells[i]}
             
-        # find the barrycenter for each cell
+        # find the barycenter for each cell
         for alpha in self.cells[i]:
-            self.barrycenters[i][alpha] = np.mean(np.array(np.where(self.masks[i] == alpha)).T, axis=0)
+            self.barycenters[i][alpha] = np.mean(np.array(np.where(self.masks[i] == alpha)).T, axis=0)
     
     def compute_vertices(self):
         """
@@ -115,7 +115,7 @@ class Segmenter:
         
         for i in range(self.N):
             # convolve that kernel with the masks
-            res = generic_filter(self.masks[i], kernel, (3, 3))
+            res = generic_filter(self.masks[i], kernel, (2, 2))
             
             self.outlines.append(res)
 
@@ -269,7 +269,7 @@ class Segmenter:
         for (alpha, beta) in tqdm(self.adjacent_cells[i]):
             self.get_border(alpha, beta, i=i) 
             
-    def segment(self, images, diameter=None):
+    def segment(self, images, diameter=None, input_boundaries=False):
         """
         
         Main function -- segments the image into cells and identifies the edges 
@@ -279,16 +279,29 @@ class Segmenter:
         if type(images) != list: images = [images]
         self.images = images
         self.N = len(images)
-        
-        print("Evaluating the neural network")
-        masks, flows, styles, diams = self.model.eval(images, diameter=diameter, flow_threshold=None, channels=[0,0])
-    
+
+        if not input_boundaries:
+            print("Evaluating the neural network")
+            masks, flows, styles, diams = self.model.eval(images, diameter=diameter, flow_threshold=None, channels=[0,0])
+        else:
+            masks = []
+            for image in images:
+                ret,thresh = cv2.threshold(image,0,255,0)
+                contours, hierarchy = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_NONE)
+                tmp = np.ones_like(image, dtype='uint16')
+                boundary = cv2.drawContours(tmp, contours, -1, 0, 1)
+                for i in range(1,len(contours)):
+                    boundary = cv2.drawContours(boundary, contours, i, i+1, -1)
+                mask = boundary
+            masks.append(mask)
+
         # original masks
         self.masks = masks
                 
         print("Fixing the masks")
         # finetune the mask
         self.finetune_masks()
+        self.visualize(name='masks', show_vertices=False)
                 
         print("Computing the vertices")
         # compute the vertices and outline
@@ -303,8 +316,8 @@ class Segmenter:
         self.find_edges()
         
         print("Finding the cell barycenters")
-        # find alll barycenters
-        self.compute_barrycenters()
+        # find all barycenters
+        self.compute_barycenters()
     
     def visualize(self, name='outlines', specific_cell = None, show_vertices = True, i = 0, overlay=False, return_img=False):
         """
