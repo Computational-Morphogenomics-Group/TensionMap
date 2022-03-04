@@ -64,12 +64,12 @@ class Segmenter:
         # Create VMSI object to store vertex, cell and edge information
         obj = VMSI_obj()
 
-        obj.V_df, cc = self.find_vertices(mask_tmp)
-        obj.C_df = self.find_cells(mask_tmp, obj.V_df)
+        obj.C_df = self.find_cells(mask_tmp)
+        obj.V_df, cc = self.find_vertices(mask_tmp, obj.C_df)
         obj.E_df = self.find_edges(obj, mask_tmp, cc)
-        return obj
+        return obj, mask_tmp
 
-    def find_vertices(self, mask):
+    def find_vertices(self, mask, C_df):
         V_df = pd.DataFrame(columns = ['coords','ncells','nverts','edges'])
 
         branchpoints = self.find_branch_points(mask==0)
@@ -101,6 +101,15 @@ class Segmenter:
         D = np.add(np.tile(np.sum(np.multiply(R, R), axis=0), (v.shape[0],1)),
                    np.tile(np.sum(np.multiply(R, R), axis=0), (v.shape[0],1)).T) - 2*np.matmul(R.T, R)
 
+        for V in range(len(V_df)):
+            for cell in V_df.at[V, 'ncells']:
+                C_df.at[cell, 'numv'] += 1
+                C_df.at[cell, 'nverts'] = np.append(C_df.at[cell, 'nverts'], np.array([V]))
+
+        for C in range(len(C_df)):
+            ncells = np.setdiff1d(np.unique(np.hstack(V_df.loc[C_df.at[C, 'nverts'], 'ncells'].tolist())), C)
+            C_df.at[C, 'ncells'] = ncells
+
         for i in range(v.shape[0]):
             for j in range(i+1,v.shape[0]):
                 if D[i,j] <= np.power(self.very_far, 2):
@@ -122,26 +131,24 @@ class Segmenter:
         branch_points = branch_points >= 3
         return branch_points
 
-    def find_cells(self, mask, V_df):
-        C_df = pd.DataFrame(columns = ['centroids','nverts','numv','ncells','edges'])
+    def find_cells(self, mask):
+        C_df = pd.DataFrame(columns = ['centroids','nverts','numv','ncells','edges', 'area', 'eccentricity', 'inertia', 'perimeter'])
 
-        c = np.array([np.flip(regionprops.centroid) for regionprops in measure.regionprops(mask)])
         # regionprops returns the co-ordinates in numpy indexing rather than cartesian indexing - e.g.
-        # (rows, cols) rather than (x, y) so flip and re-sort coordinates
+        # (rows, cols) rather than (x, y) so flip
+        c = np.array([np.flip(regionprops.centroid) for regionprops in measure.regionprops(mask)])
+        a = np.array([regionprops.area for regionprops in measure.regionprops(mask)])
+        e = np.array([regionprops.eccentricity for regionprops in measure.regionprops(mask)])
+        p = np.array([regionprops.perimeter for regionprops in measure.regionprops(mask)])
+        ine = np.array([regionprops.inertia_tensor[np.triu_indices(2)] for regionprops in measure.regionprops(mask)])
+
+        # estimate very_far to be the half the maximum cell perimeter
+        self.very_far = np.max(p[1:])/2
 
         for i in range(c.shape[0]):
-            centroid = c[i,:]
-            cell_df = pd.DataFrame({'centroids':[centroid],'nverts':[np.array([])],'numv':0,'ncells':[np.array([])],'edges':[np.array([])]})
+            cell_df = pd.DataFrame({'centroids':[c[i,:]],'nverts':[np.array([])],'numv':0,'ncells':[np.array([])], \
+                                    'edges':[np.array([])], 'area':a[i], 'eccentricity':e[i], 'inertia':[ine[i]], 'perimeter':p[i]})
             C_df = pd.concat([C_df, cell_df], ignore_index=True)
-
-        for V in range(len(V_df)):
-            for cell in V_df.at[V, 'ncells']:
-                C_df.at[cell, 'numv'] += 1
-                C_df.at[cell, 'nverts'] = np.append(C_df.at[cell, 'nverts'], np.array([V]))
-
-        for C in range(len(C_df)):
-            ncells = np.setdiff1d(np.unique(np.hstack(V_df.loc[C_df.at[C, 'nverts'], 'ncells'].tolist())), C)
-            C_df.at[C, 'ncells'] = ncells
         return C_df
 
     def relabel(self, mask):

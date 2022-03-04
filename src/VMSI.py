@@ -1,6 +1,7 @@
 import cv2
 import glob
 import cyipopt
+import matplotlib.patches
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
@@ -13,8 +14,10 @@ from scipy.optimize import minimize, leastsq
 from scipy.sparse import coo_matrix
 import pandas as pd
 import matlab.engine
+import skimage.measure as measure
 import matlab
 from matplotlib import cm
+import matplotlib
 
 class VMSI():
 
@@ -37,6 +40,7 @@ class VMSI():
         self.cells['qx'] = np.zeros(len(self.cells))
         self.cells['qy'] = np.zeros(len(self.cells))
         self.cells['theta'] = np.zeros(len(self.cells))
+        self.cells['stress'] = [np.array([0,0,0]) for _ in range(self.cells.shape[0])]
 
     # Initialize attributes
         self.dV = None
@@ -306,7 +310,7 @@ class VMSI():
 
         # This excludes vertices surrounded by boundary cells; is this a requirement for improved inference?
 #        self.bulk_vertices = np.unique(np.concatenate([self.cells.at[cell, 'nverts'] for cell in self.bulk_cells]))
-        # Try another way instead - bulk cells are all verta that are not part of external cell
+        # Try another way instead - bulk cells are all verts that are not part of external cell
         self.bulk_vertices = np.arange(0,len(self.vertices))
         self.bulk_vertices = self.bulk_vertices[np.isin(np.arange(0,len(self.vertices)), self.cells.at[0, 'nverts'], invert=True)]
 
@@ -389,9 +393,12 @@ class VMSI():
         self.build_diff_operators()
 
         self.involved_edges = -1 * np.ones(self.dC.shape[0], dtype=int)
-        for i in range(self.dC.shape[0]):
-            edge_cells = self.involved_cells[np.ravel(np.where(self.dC[i,] != 0))]
-            self.involved_edges[i] = np.ravel(np.where(np.sum([np.sort(self.edges.at[edge, 'cells']) == np.sort(edge_cells) for edge in range(len(self.edges))], axis=1) == 2))
+
+
+        for i in range(len(self.edges)):
+            edge_cells = self.edges.at[i, 'cells']
+            idx = np.where((self.dC[:,np.where(edge_cells[0]==self.involved_cells)[0]] != 0) & (self.dC[:,np.where(edge_cells[1]==self.involved_cells)[0]] != 0))[0]
+            self.involved_edges[idx] = i
 
         # initialise variables
         tau_1 = np.zeros((self.dV.shape[0], 2))
@@ -710,6 +717,111 @@ class VMSI():
                 points = np.array([rho[0] + radius*np.cos(theta_range),
                                    rho[1] + radius*np.sin(theta_range)]).T
                 ax.plot(points[:,0], points[:,1], lw=3, color=colour)
+
+        plt.show()
+        return
+
+    def compute_stresstensor(self, mode=0):
+        """
+
+        Compute stress tensor for each cell from tensions and pressures
+
+        :param mode: 0 or 1, specifies how calculation is performed
+        """
+
+        p = np.array([self.cells.at[cell, 'pressure'] for cell in self.involved_cells])
+        T = np.zeros(self.cell_pairs.shape[0])
+        edge_verts = np.array(self.edges.verts.to_list())
+
+        i1 = -1*np.ones_like(T)
+        for e in range(len(T)):
+            verts = self.involved_vertices[self.dV[e,:] != 0]
+
+            if len(verts) == 2:
+                ind = np.where(np.all(verts == np.sort(edge_verts, axis=1), axis=1))[0]
+            else:
+                ind = np.array([])
+
+            if ind.size>0 and self.edges.at[int(ind), 'tension'].size>0:
+                T[e] = self.edges.at[int(ind), 'tension']
+                i1[e] = int(ind)
+            else:
+                T[e] = 1
+
+        rv = np.array([self.vertices.at[vertex, 'coords'] for vertex in self.involved_vertices])
+
+        # Implement mode 0 first since that looks more sensible
+        if mode == 1:
+            sigma = np.zeros([len(self.bulk_cells),3])
+            for c in self.bulk_cells:
+                c_verts = self.cells.at[c, 'nverts']
+                for v in c_verts:
+                    r0 = rv[self.involved_vertices==v,:]
+        elif mode == 0:
+            rb = np.matmul(self.dV, rv)
+            D = np.sqrt(np.sum(np.power(rb, 2), 1))
+            D[D==0] = 1
+            rb = np.divide(rb.T, D).T
+            Rot = np.array([[0,-1],[1,0]])
+            nb = np.matmul(rb, Rot.T)
+            dP = np.matmul(self.dC, p)
+
+            sigmaB = np.zeros([rb.shape[0], 3])
+            sigmaB[:,0] = rb[:,0] * T * rb[:,0]
+            sigmaB[:,1] = rb[:,0] * T * rb[:,1]
+            sigmaB[:,2] = rb[:,1] * T * rb[:,1]
+
+            sigmaP = np.zeros([rb.shape[0], 3])
+            sigmaP[:,0] = nb[:,0] * dP * D * nb[:,0]
+            sigmaP[:,1] = nb[:,0] * dP * D * nb[:,1]
+            sigmaP[:,2] = nb[:,1] * dP * D * nb[:,1]
+
+            sigma = np.matmul(np.abs(self.dC.T), sigmaB) + 0.5 * np.matmul(self.dC.T, sigmaP)
+
+            A = np.array(self.cells.area.to_list())[1:]
+            sigma = np.divide(sigma.T, A)
+            for c in range(len(self.involved_cells)):
+                self.cells.at[self.involved_cells[c], 'stress'] = sigma[:,c]
+        return
+
+    def draw_stresstensor(self, mask):
+        img = mask
+
+        fig, ax = plt.subplots(1,1,figsize=np.divide(mask.shape,72), dpi=72)
+        ax.imshow(img)
+        ax.spines['top'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        stress = np.array([self.cells.at[cell, 'area'] * np.array([[self.cells.at[cell, 'stress'][0], self.cells.at[cell, 'stress'][1]],[self.cells.at[cell, 'stress'][1], self.cells.at[cell, 'stress'][2]]]) for cell in self.involved_cells])
+        eigvals, eigvects = np.linalg.eig(stress)
+        scalefct = np.sqrt(np.median(np.multiply(eigvals[:,0], eigvals[:,1])))
+
+        for i in range(len(self.involved_cells)):
+            cell = self.involved_cells[i]
+            centroid = self.cells.at[cell, 'centroids']
+            eigval = eigvals[i,:]
+            eigvect = eigvects[i,:,:]
+            idx = np.flip(np.argsort(eigval))
+            eigval = eigval[idx]
+            eigvect = eigvect[:,idx]
+
+            # scale eigenvalues
+            eigval = np.divide(eigval, scalefct)
+            eigval[eigval>3] = 3
+            eigval[eigval<0] = 0
+            eigval = eigval * 0.4 * np.mean(np.sqrt(np.divide(np.array(self.cells.area.to_list())[1:], np.pi)))
+
+            # calculate angle of rotation
+            theta = np.arctan2(eigvect[1,0], eigvect[0,0])
+            if theta < 0:
+                theta = theta + 2*np.pi
+            theta = np.degrees(theta)
+            stress_ellipse = matplotlib.patches.Ellipse(centroid, eigval[0], eigval[1], theta, fill=False, color='red', lw=3)
+            ax.add_patch(stress_ellipse)
 
         plt.show()
         return
