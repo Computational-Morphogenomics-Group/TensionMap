@@ -295,7 +295,7 @@ class VMSI():
                     # create new edge between new vertices
                     # edge is only one pixel long so no need to add pixels
                     self.edges = self.edges.append({'pixels':np.array([]),'verts':np.array([]),'cells':np.array([]),
-                                                    'radius':np.array([]), 'rho':np.array([])},ignore_index=True)
+                                                    'radius':np.array([]), 'rho':np.array([]), 'fitenergy':np.Inf, 'tension':float(0)},ignore_index=True)
 
                     self.edges.at[num_e,'verts'] = np.array([v, num_v])
                     self.edges.at[num_e,'cells'] = joint_cells
@@ -1049,10 +1049,10 @@ class VMSI():
         return
 
     def return_tensions(self):
-        return self.edges.tension.to_numpy()
+        return self.edges.tension.values
 
     def return_pressures(self):
-        return self.cells.pressure.to_numpy()[1:]
+        return self.cells.pressure.values[1:]
 
     def compute_stresstensor(self, mode=0):
         """
@@ -1194,31 +1194,32 @@ class VMSI():
                     colourmap = cm.get_cmap('inferno')
 
                     for e in range(len(self.edges)):
-                        radius = self.edges.at[e, 'radius']
-                        tension_norm = np.divide(self.edges.at[e, 'tension'], maxT-minT)
-                        colour = colourmap(tension_norm)
+                        if self.edges.at[e, 'tension'] > 0:
+                            radius = self.edges.at[e, 'radius']
+                            tension_norm = np.divide(self.edges.at[e, 'tension'], maxT-minT)
+                            colour = colourmap(tension_norm)
 
-                        if np.isinf(radius):
+                            if np.isinf(radius):
 
-                            v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
-                            points = np.array([np.linspace(v[0,0], v[1,0], len(self.edges.at[e, 'pixels'])),
-                                               np.linspace(v[0,1], v[1,1], len(self.edges.at[e, 'pixels']))]).T
-                            ax.plot(points[:,0], points[:,1], lw=3, color=colour)
-                        else:
-                            v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
-                            rho = self.edges.at[e, 'rho']
+                                v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
+                                points = np.array([np.linspace(v[0,0], v[1,0], len(self.edges.at[e, 'pixels'])),
+                                                   np.linspace(v[0,1], v[1,1], len(self.edges.at[e, 'pixels']))]).T
+                                ax.plot(points[:,0], points[:,1], lw=3, color=colour)
+                            else:
+                                v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
+                                rho = self.edges.at[e, 'rho']
 
-                            theta = np.arctan2(v[:,1]-rho[1], v[:,0]-rho[0])
-                            theta[theta<0] = theta[theta<0] + 2*np.pi
-                            theta = np.sort(theta)
+                                theta = np.arctan2(v[:,1]-rho[1], v[:,0]-rho[0])
+                                theta[theta<0] = theta[theta<0] + 2*np.pi
+                                theta = np.sort(theta)
 
-                            if theta[1] - theta[0] > np.pi:
-                                theta[1] = theta[1] - 2*np.pi
+                                if theta[1] - theta[0] > np.pi:
+                                    theta[1] = theta[1] - 2*np.pi
 
-                            theta_range = np.linspace(theta[0], theta[1], len(self.edges.at[e, 'pixels']))
-                            points = np.array([rho[0] + radius*np.cos(theta_range),
-                                               rho[1] + radius*np.sin(theta_range)]).T
-                            ax.plot(points[:,0], points[:,1], lw=3, color=colour)
+                                theta_range = np.linspace(theta[0], theta[1], len(self.edges.at[e, 'pixels']))
+                                points = np.array([rho[0] + radius*np.cos(theta_range),
+                                                   rho[1] + radius*np.sin(theta_range)]).T
+                                ax.plot(points[:,0], points[:,1], lw=3, color=colour)
                 elif option == 'cap':
                     for e in range(len(self.edges)):
                         radius = self.edges.at[e, 'radius']
@@ -1228,7 +1229,7 @@ class VMSI():
                             v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
                             points = np.array([np.linspace(v[0,0], v[1,0], len(self.edges.at[e, 'pixels'])),
                                                np.linspace(v[0,1], v[1,1], len(self.edges.at[e, 'pixels']))]).T
-                            ax.plot(points[:,0], points[:,1], lw=3, color='blue')
+                            ax.plot(points[:,0], points[:,1], lw=3, color='b')
                         else:
                             v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
                             rho = self.edges.at[e, 'rho']
@@ -1250,7 +1251,7 @@ class VMSI():
         plt.show()
         return
 
-def run_VMSI(img, is_labelled=False, tile=True, verbose=False):
+def run_VMSI(img, is_labelled=False, tile=True, verbose=False, overlap=0.3):
     """
     Main function to run stress inference.
     :param verbose: (bool) whether to provide detailed output.
@@ -1264,7 +1265,7 @@ def run_VMSI(img, is_labelled=False, tile=True, verbose=False):
     if tile:
         if not is_labelled:
             img = measure.label(img)
-        tiles, offset, adj_tiles = create_image_tiles(img)
+        tiles, offset, adj_tiles = create_image_tiles(img, overlap=overlap)
         models = []
 
         pairwise_tensions = []
@@ -1393,6 +1394,9 @@ def merge_models(models, p_scale, t_scale, offset, img, verbose):
     merged_model = VMSI(vertices=VMSI_obj.V_df, cells=VMSI_obj.C_df, edges=VMSI_obj.E_df, height=img.shape[0], width=img.shape[1], verbose=verbose)
     merged_model.prepare_data()
 
+    # counters for number of inferred values for each edge and cell
+    ncell = np.zeros(len(merged_model.cells))
+    nedge = np.zeros(len(merged_model.edges))
     for i in range(len(models)):
         model = models[i]
         model.cells.pressure = model.cells.pressure.apply(lambda x: x + p_scale[i])
@@ -1406,11 +1410,17 @@ def merge_models(models, p_scale, t_scale, offset, img, verbose):
             return indices
 
         cell_indices = match_index(np.array(model.cells.loc[model.involved_cells].centroids.tolist()) + offset[i], np.array(merged_model.cells.centroids.tolist()))
-        merged_model.cells.loc[cell_indices, ['pressure', 'stress']] = model.cells.loc[model.involved_cells, ['pressure', 'stress']].values
+        merged_model.cells.loc[cell_indices, ['pressure', 'stress']] = merged_model.cells.loc[cell_indices, ['pressure', 'stress']].values + model.cells.loc[model.involved_cells, ['pressure', 'stress']].values
+        ncell[cell_indices] += 1
 
-        vertex_indices = match_index(np.array(model.vertices.coords.tolist()) + offset[i], np.array(merged_model.vertices.coords.tolist()))
         for edge in model.involved_edges:
-            index = int(np.where(np.all(vertex_indices[model.edges.at[edge, 'verts']] == np.array(merged_model.edges.verts.tolist()), axis=1))[0])
-            merged_model.edges.at[index, 'tension'] = model.edges.at[edge, 'tension']
+            index = int(np.where(np.all(np.sort(cell_indices[np.ravel(np.argwhere(np.isin(model.involved_cells, model.edges.at[edge, 'cells'])))]) == np.sort(np.array(merged_model.edges.cells.tolist())), axis=1))[0])
+            merged_model.edges.at[index, 'tension'] = merged_model.edges.at[index, 'tension'] + model.edges.at[edge, 'tension']
+            nedge[index] += 1
+
+    # Take mean over edges and cells with multiple inferred values
+    merged_model.cells.loc[ncell>0, 'pressure'] = np.divide(merged_model.cells.loc[ncell>0, 'pressure'].values,ncell[ncell>0])
+    merged_model.cells.loc[ncell>0, 'stress'] = np.divide(merged_model.cells.loc[ncell>0, 'stress'].values,ncell[ncell>0])
+    merged_model.edges.loc[nedge>0, 'tension'] = np.divide(merged_model.edges.loc[nedge>0, 'tension'].values,nedge[nedge>0])
 
     return merged_model
