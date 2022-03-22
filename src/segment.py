@@ -25,7 +25,7 @@ class VMSI_obj:
         self.E_df = []
 
 class Segmenter:
-    def __init__(self, masks = None, very_far = 150, labelled=False):
+    def __init__(self, images = None, masks = None, very_far = 150, labelled=False):
         """
         :param masks: Numpy array - Segmented image with edges set to zero and cells set to non-zero. Edges must be 1px wide and 4-connected.
         :param very_far: Int - Maximum distance between two vertices connected by the same edge.
@@ -35,6 +35,8 @@ class Segmenter:
         self.masks = []
         self.very_far = very_far
 
+        if images is not None:
+            self.images = images
         if masks is not None:
             self.masks = masks
         if not labelled:
@@ -262,3 +264,35 @@ class Segmenter:
         neighborhood_count = ndi.convolve(image,k, mode='constant', cval=1)
         neighborhood_count[~image.astype(np.bool)] = 0
         return neighborhood_count == 1
+
+    def segment_image(self, diameter=None, channels=[0,0]):
+        """
+        :param diameter: estimated diameter (px) for cells in image. If not specified, this will be estimated from the image
+        :param channels: channels containing membrane and nuclear staining of image. 0 - Grayscale, 1 - R, 2 - G, 3 - B
+        :return: segmented image
+        """
+        image = self.images.copy()
+        image = image.astype(float)
+
+        # Assuming membrane staining instead of cytoplasm, invert image before segmenting with Cellpose
+        def normalise_image(image):
+            image_norm = image.copy()
+            ub = np.percentile(image, 99)
+            lb = np.percentile(image, 1)
+            image_norm[image_norm>ub] = ub
+            image_norm[image_norm<lb] = lb
+            image_norm = np.divide(image_norm-lb, ub - lb)
+            return image_norm
+
+        if channels != [0,0]:
+            #image[:,:,channels[0]-1] = 1-normalise_image(image[:,:,channels[0]-1])
+            image[:,:,channels[0]-1] = normalise_image(image[:,:,channels[0]-1])
+            image[:,:,channels[1]-1] = normalise_image(image[:,:,channels[1]-1])
+        else:
+            image = normalise_image(image)
+
+        model = models.Cellpose(model_type='cyto2')
+        masks, flows, styles, diams = model.eval(image, diameter=diameter, channels=channels, progress=True)
+        segmented_image = masks
+
+        return segmented_image
