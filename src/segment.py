@@ -10,6 +10,7 @@ from scipy.ndimage import generic_filter
 import itertools
 from tqdm import tqdm
 from scipy.optimize import minimize, leastsq
+from scipy.spatial import ConvexHull
 import skimage.segmentation as seg
 import skimage.morphology as morph
 import skimage.measure as measure
@@ -42,7 +43,7 @@ class Segmenter:
         if not labelled:
             self.masks = measure.label(self.masks)
 
-    def process_segmented_image(self):
+    def process_segmented_image(self, holes_mask=None):
         """
         Given a segmented mask, produce VMSI_obj for input into VMSI
         """
@@ -50,6 +51,12 @@ class Segmenter:
         # Process mask
         # Clear border (create external cell from all cells that run into image boundary)
         tmp1 = seg.clear_border(self.masks)
+        # If we are specifying holes, also set cells bordering holes as external cell
+        if holes_mask is not None:
+            tmp5 = morph.binary_dilation(holes_mask, footprint=np.ones([5,5]))
+            hole_adj_cells = np.unique(tmp5 * self.masks)[1:]
+            tmp6 = np.isin(self.masks, hole_adj_cells)
+            tmp1[tmp6] = 0
         tmp2 = ((self.masks - tmp1)>0).astype(int)
         tmp3 = tmp1 + tmp2
 
@@ -60,7 +67,7 @@ class Segmenter:
 
         mask_tmp = tmp1
 
-        # Relabel mask (may not be necessary in future, just for Matlab compatibility
+        # Relabel mask (may not be necessary in future, just for Matlab compatibility)
         mask_tmp = self.relabel(mask_tmp)
 
         # Create VMSI object to store vertex, cell and edge information
@@ -69,6 +76,7 @@ class Segmenter:
         obj.C_df = self.find_cells(mask_tmp)
         obj.V_df, cc = self.find_vertices(mask_tmp, obj.C_df)
         obj.E_df = self.find_edges(obj, mask_tmp, cc)
+        self.identify_holes(obj)
         return obj, mask_tmp
 
     def find_vertices(self, mask, C_df):
@@ -134,24 +142,47 @@ class Segmenter:
         return branch_points
 
     def find_cells(self, mask):
-        C_df = pd.DataFrame(columns = ['centroids','nverts','numv','ncells','edges', 'area', 'eccentricity', 'inertia', 'perimeter'])
+        # Identify cells, record region information
+        C_df = pd.DataFrame(columns = ['centroids','nverts','numv','ncells','edges', 'area', 'holes',\
+                                       'eccentricity', 'inertia', 'perimeter','axis_major','axis_minor','feret_d', \
+                                       'equiv_diam_area','moments_hu','bbox','orientation'])
 
         # regionprops returns the co-ordinates in numpy indexing rather than cartesian indexing - e.g.
         # (rows, cols) rather than (x, y) so flip
         c = np.array([np.flip(regionprops.centroid) for regionprops in measure.regionprops(mask)])
-        a = np.array([regionprops.area for regionprops in measure.regionprops(mask)])
-        e = np.array([regionprops.eccentricity for regionprops in measure.regionprops(mask)])
         p = np.array([regionprops.perimeter for regionprops in measure.regionprops(mask)])
         ine = np.array([regionprops.inertia_tensor[np.triu_indices(2)] for regionprops in measure.regionprops(mask)])
+        bbox = np.array([[regionprops.bbox[3]-regionprops.bbox[1],regionprops.bbox[2]-regionprops.bbox[0]] for regionprops in measure.regionprops(mask)])
+        moments_hu = np.array([regionprops.moments_hu for regionprops in measure.regionprops(mask)])
+        cell_props = pd.DataFrame(measure.regionprops_table(mask, properties=('label','eccentricity','axis_major_length','axis_minor_length', \
+                                                                              'feret_diameter_max','equivalent_diameter_area','orientation','area')))
 
         # estimate very_far to be the half the maximum cell perimeter
         self.very_far = np.max(p[1:])/2
 
         for i in range(c.shape[0]):
-            cell_df = pd.DataFrame({'centroids':[c[i,:]],'nverts':[np.array([])],'numv':0,'ncells':[np.array([])], \
-                                    'edges':[np.array([])], 'area':a[i], 'eccentricity':e[i], 'inertia':[ine[i]], 'perimeter':p[i]})
+            cell_df = pd.DataFrame({'centroids':[c[i,:]],'nverts':[np.array([])],'numv':0,'ncells':[np.array([])], 'edges':[np.array([])], \
+                                    'area':cell_props.at[i,'area'], 'holes':False, 'eccentricity':cell_props.at[i,'eccentricity'], 'inertia':[ine[i]], \
+                                    'perimeter':p[i], 'axis_major':cell_props.at[i,'axis_major_length'],'axis_minor':cell_props.at[i,'axis_minor_length'], \
+                                    'feret_d':cell_props.at[i,'feret_diameter_max'],'equiv_diam_area':cell_props.at[i,'equivalent_diameter_area'], \
+                                    'moments_hu':[moments_hu[i,:]],'bbox':[bbox[i,:]],'orientation':cell_props.at[i,'orientation']})
             C_df = pd.concat([C_df, cell_df], ignore_index=True)
         return C_df
+
+    def identify_holes(self, obj):
+        """
+        Filter out labelled objects that have area greater than 2x the median area and are non-convex
+        """
+        areas = obj.C_df['area'].to_numpy()
+        for i in range(obj.C_df.shape[0]):
+            vcoords = np.array(obj.V_df.loc[obj.C_df.at[i, 'nverts'], 'coords'].tolist())
+            if vcoords.shape[0] >= 3:
+                hull = ConvexHull(vcoords)
+                if hull.simplices.shape[0] < vcoords.shape[0] and obj.C_df.at[i, 'area'] > 2*np.median(areas):
+                    obj.C_df.at[i, 'holes'] = True
+            else:
+                obj.C_df.at[i, 'holes'] = True
+        return
 
     def relabel(self, mask):
         """
@@ -265,10 +296,11 @@ class Segmenter:
         neighborhood_count[~image.astype(np.bool)] = 0
         return neighborhood_count == 1
 
-    def segment_image(self, diameter=None, channels=[0,0]):
+    def segment_image(self, diameter=None, channels=[0,0], use_model='default'):
         """
         :param diameter: estimated diameter (px) for cells in image. If not specified, this will be estimated from the image
         :param channels: channels containing membrane and nuclear staining of image. 0 - Grayscale, 1 - R, 2 - G, 3 - B
+        :param use_model: which Cellpose neural network to use. 'default' - Cyto2, 'custom' - custom trained model.
         :return: segmented image
         """
         image = self.images.copy()
@@ -285,13 +317,21 @@ class Segmenter:
             return image_norm
 
         if channels != [0,0]:
-            #image[:,:,channels[0]-1] = 1-normalise_image(image[:,:,channels[0]-1])
-            image[:,:,channels[0]-1] = normalise_image(image[:,:,channels[0]-1])
+            image[:,:,channels[0]-1] = 1-normalise_image(image[:,:,channels[0]-1])
             image[:,:,channels[1]-1] = normalise_image(image[:,:,channels[1]-1])
         else:
             image = normalise_image(image)
 
-        model = models.Cellpose(model_type='cyto2')
+        if use_model == 'default':
+            model = models.Cellpose(model_type='cyto2')
+        elif use_model == 'custom':
+            import pathlib
+            src_path = str(pathlib.Path(__file__).parent.resolve())
+            modeldir = f'{src_path}/cellpose_models/cellpose_residual_on_style_on_concatenation_off_train_folder_2022_03_24_00_26_36.748195'
+            model = models.Cellpose(model_dir=modeldir, net_avg=False)
+        else:
+            return "Invalid use_model option. Available models are 'default', 'custom'."
+
         masks, flows, styles, diams = model.eval(image, diameter=diameter, channels=channels, progress=True)
         segmented_image = masks
 
