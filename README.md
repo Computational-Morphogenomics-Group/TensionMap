@@ -15,7 +15,7 @@ To be updated...
 
 [Running pipeline on synthetic image and basic analysis](notebooks/synthetic_image.ipynb) <br />
 [Running pipeline on seqFISH mouse embryo dorsal region](notebooks/mouse_dorsal_seqfish_inference.ipynb) <br />
-[Integrated analysis of gene expression and mechanics/morphology for seqFISH mouse embryo dorsal region](notebooks/mouse_dorsal_seqfish_inference.ipynb)
+[Integrated analysis of gene expression and mechanics/morphology for seqFISH mouse embryo dorsal region](notebooks/mouse_dorsal_seqfish_analysis.ipynb)
 
 ## Quickstart
 
