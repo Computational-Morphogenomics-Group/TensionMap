@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from cellpose import models, utils, plot
 from scipy.ndimage import generic_filter
 from scipy.spatial.distance import cdist
 from scipy.optimize import minimize, least_squares, LinearConstraint
+from sklearn.cluster import KMeans
 import pandas as pd
 from skimage import measure, color
 from matplotlib import cm, patches, colors
@@ -14,6 +14,12 @@ import warnings
 
 
 def sx_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
+    """
+
+    Computes part of the jacobian of the energy function (the partial derivative with respect to x) analytically
+    to improve the speed and accuracy of initial optimisation.
+
+    """
     t3 = p1-p2
     t5 = p1*q1x
     t6 = p2*q2x
@@ -38,6 +44,12 @@ def sx_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
     return Dx
 
 def sy_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
+    """
+
+    Computes part of the jacobian of the energy function (the partial derivative with respect to y) analytically
+    to improve the speed and accuracy of initial optimisation.
+
+    """
     t3 = p1-p2
     t5 = p1*q1x
     t6 = p2*q2x
@@ -61,6 +73,12 @@ def sy_grad(p1, p2, q1x, q1y, q2x, q2y, rx, ry):
     return Dy
 
 def radius_grad_theta(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
+    """
+
+    Computes the jacobian of the energy function (the partial derivative with respect to x) analytically to improve the
+    speed and accuracy of theta optimisation.
+
+    """
     t4 = p1-p2
     t5 = q1x-q2x
     t6 = q1y-q2y
@@ -77,14 +95,32 @@ def radius_grad_theta(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
     return Dr
 
 def rx_grad(p1, p2, q1x, q2x, rx):
+    """
+
+    Computes part of the jacobian of the nonlinear constraint function (the partial derivative with respect to x)
+    analytically to improve the speed and accuracy of initial optimisation.
+
+    """
     Dx = np.array([p1, np.zeros(p1.shape), q1x-rx, -p2, np.zeros(p1.shape), -q2x+rx]).T
     return Dx
 
 def ry_grad(p1, p2, q1y, q2y, ry):
+    """
+
+    Computes part of the jacobian of the nonlinear constraint function (the partial derivative with respect to y)
+    analytically to improve the speed and accuracy of initial optimisation.
+
+    """
     Dy = np.array([np.zeros(p1.shape),p1,q1y-ry,np.zeros(p1.shape),-p2,-q2y+ry]).T
     return Dy
 
 def rho_x_grad(p1,p2,q1x,q2x):
+    """
+
+    Computes part of the jacobian of the energy function analytically to improve the speed and accuracy of
+    the main optimisation step.
+
+    """
     t2 = p1-p2
     t3 = np.divide(1,t2)
     t4 = np.divide(1,np.power(t2,2))
@@ -95,6 +131,12 @@ def rho_x_grad(p1,p2,q1x,q2x):
     return dRhoX
 
 def rho_y_grad(p1,p2,q1y,q2y):
+    """
+
+    Computes part of the jacobian of the energy function analytically to improve the speed and accuracy of
+    the main optimisation step.
+
+    """
     t2 = p1-p2
     t3 = np.divide(1,t2)
     t4 = np.divide(1,np.power(t2,2))
@@ -105,6 +147,12 @@ def rho_y_grad(p1,p2,q1y,q2y):
     return dRhoY
 
 def radius_grad(p1,p2,q1x,q1y,q2x,q2y,t1,t2):
+    """
+
+    Computes part of the jacobian of the energy function analytically to improve the speed and accuracy of
+    the main optimisation step.
+
+    """
     t4 = p1-p2
     t5 = q1x-q2x
     t6 = q1y-q2y
@@ -191,8 +239,8 @@ class VMSI():
     def fit_circle(self):
         """
 
-        fit circle to each edge
-        if edge is too flat, fit line instead
+        Fit circle to each edge
+        If edge is too flat, fit line instead
 
         """
         for i in range(len(self.edges)):
@@ -214,6 +262,7 @@ class VMSI():
             B = np.sum((np.sum(np.power(delta, 2), axis=1) - np.power(L0, 2)) * IP)
             y0 = np.divide(B, A)
 
+            # Minimise the MSQ between edge pixels and fitted arc
             def energyfunc(x):
                 return np.mean(np.power(np.sqrt(np.sum(np.power(delta-(x*nB), 2), axis=1)) - np.sqrt(np.power(x, 2) + np.power(L0, 2)), 2))
 
@@ -225,6 +274,7 @@ class VMSI():
             E = res.fun
 
             linedistance = np.mean(np.power(IP, 2))
+            # Store the radius, centre and fit energy of each fitted circular arc or straight line
             if (E < linedistance and len(edge_pixels) > 3):
                 self.edges.at[i,'radius'] = np.sqrt(np.power(y, 2) + np.power(L0, 2))
                 self.edges.at[i,'rho'] = x0 + (y * nB)
@@ -233,14 +283,13 @@ class VMSI():
                 self.edges.at[i,'radius'] = np.Inf
                 self.edges.at[i,'rho'] = np.array([np.Inf, np.Inf])
                 self.edges.at[i,'fitenergy'] = linedistance
-
         return
 
 
     def remove_fourfold(self):
         """
 
-        recursively removes fourfold (or greater) vertices by moving vertex apart in direction of greatest variance
+        recursively removes fourfold (or greater) vertices by splitting vertex apart in direction of greatest variance
 
         """
 
@@ -285,7 +334,7 @@ class VMSI():
                     self.vertices = self.vertices.append({'coords':[0,0],'ncells':np.array([]),'nverts':np.array([]),'edges':np.array([])}, ignore_index=True)
                     self.vertices.at[num_v,'coords'] = rV1.tolist()
                     self.vertices.at[num_v,'nverts'] = np.concatenate((nverts[pos_verts.astype('bool')], np.array([v])))
-                    self.vertices.at[num_v,'fourfold'] = 0
+                    self.vertices.at[num_v,'fourfold'] = False
 
                     pos_cell = ncells[[(sum(np.isin(nverts[pos_verts.astype('bool')], self.cells['nverts'][cell]))==2) for cell in ncells]]
 
@@ -348,7 +397,7 @@ class VMSI():
         boundary_cells = np.where(self.cells['holes'].to_numpy())[0]
         boundary_verts = np.unique(np.concatenate(self.cells.loc[boundary_cells,'nverts'].tolist()))
 
-        # iterate through all non-boundary verts
+        # Iterate through all non-boundary verts
         for v in range(len(self.vertices)):
             if (v not in boundary_verts and len(self.vertices.at[v,'nverts']) == 3):
 
@@ -370,10 +419,13 @@ class VMSI():
                 z23 = np.cross(np.concatenate((r[1,:], np.array([0]))), np.concatenate((r[2,:], np.array([0]))))
                 z31 = np.cross(np.concatenate((r[2,:], np.array([0]))), np.concatenate((r[0,:], np.array([0]))))
 
+                # Determine angle between all pairs of edges
                 theta12 = np.mod(np.arctan2(z12[2], np.dot(r[0,:], r[1,:])), 2*np.pi)
                 theta23 = np.mod(np.arctan2(z23[2], np.dot(r[1,:], r[2,:])), 2*np.pi)
                 theta31 = np.mod(np.arctan2(z31[2], np.dot(r[2,:], r[0,:])), 2*np.pi)
 
+                # If any theta>pi, move vertex until it's not
+                # This accounts for measurement noise in junctions where one angle is close to pi
                 if theta12 > np.pi:
                     deltaR = np.dot(n[0,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[0,:]-n[1,:])) / np.dot(n[2,:]-rv, np.matmul(np.array([[0,-1],[1,0]]), n[0,:]-n[1,:]))
                     nrv = rv + 1.5*deltaR*(n[2,:]-rv)
@@ -399,31 +451,31 @@ class VMSI():
     def prepare_data(self):
         """
 
-        prepare data for tension inference
-        remove fourfold vertices, fit circles, make vertices convex
+        Prepare data for tension inference:
+        Remove fourfold vertices, fit circles, make vertices convex
 
         """
 
         # Fit circular arcs to each edge
         self.fit_circle()
 
-        # Recursively remove fourfold vertices by moving them apart
+        # Recursively remove n-fold vertices (for n>3) by splitting and moving resulting (n-1)-fold vertices apart
         self.remove_fourfold()
 
         # Inference cannot handle concave vertices (with one angle greater than pi) so remove these
         self.make_convex()
+
         return
 
 
     def classify_cells(self):
         """
 
-        determine which cells are involved in tension inference
-        initialize q as cell centroids
+        Determine which cells are involved in tension inference
+        Initialize q as cell centroids
 
         """
 
-        # This is enough for now, but may need to update to deal with holes
         self.bulk_cells = np.array(range(0,len(self.cells)))
 
         boundary_cells = np.unique(np.concatenate([self.cells.at[0, 'ncells'], np.where(self.cells['holes'].to_numpy()[1:])[0]]))
@@ -432,18 +484,14 @@ class VMSI():
         all_threefold = np.array([not(any(self.vertices.loc[self.cells.at[cell, 'nverts'], 'fourfold'].to_numpy())) for cell in range(len(self.cells))])
         self.bulk_cells = self.bulk_cells[all_threefold]
         self.bulk_cells = self.bulk_cells[np.isin(self.bulk_cells, boundary_cells, invert=True)]
-
         bad_cells = np.array([])
         for cell in self.bulk_cells:
             if np.sum(np.isin(self.cells.at[cell, 'ncells'], self.bulk_cells)) == 0:
                 bad_cells = np.append(bad_cells, cell)
         self.bulk_cells = self.bulk_cells[np.isin(self.bulk_cells, bad_cells, invert=True)]
 
-        # This excludes vertices surrounded by boundary cells; is this a requirement for improved inference?
+        # This excludes vertices surrounded by boundary cells; edges at these vertices are not constrained enough for accurate inference
         self.bulk_vertices = np.unique(np.concatenate([self.cells.at[cell, 'nverts'] for cell in self.bulk_cells]))
-        # Try another way instead - bulk cells are all verts that are not part of external cell
-#        self.bulk_vertices = np.arange(0,len(self.vertices))
-#        self.bulk_vertices = self.bulk_vertices[np.isin(np.arange(0,len(self.vertices)), self.cells.at[0, 'nverts'], invert=True)]
 
         self.involved_cells = np.unique(np.concatenate([self.vertices.at[vert, 'ncells'] for vert in self.bulk_vertices]))
         self.ext_cells = self.involved_cells[np.isin(self.involved_cells, self.bulk_cells, invert=True)]
@@ -462,7 +510,7 @@ class VMSI():
     def build_diff_operators(self):
         """
 
-        compute difference operators to enable vectorized operations
+        Compute difference operators to enable vectorized operations
 
         """
         # Build cell adjacency matrix
@@ -475,7 +523,7 @@ class VMSI():
             for ncell in self.cells.at[cell, 'ncells']:
                 j = np.ravel(np.where(self.involved_cells == ncell))
                 # Ensure that edge between neighbouring cells actually exists
-                if j.size > 0 and adj_mat[i, j] == 0 and any(np.all(np.sort(np.array([cell, ncell])) == edge_cells, axis=1)):
+                if j.size > 0 and adj_mat[i, j] == 0 and np.any(np.all(np.sort(np.array([cell, ncell])) == edge_cells, axis=1)):
                     adj_mat[i, j] = 1
                     adj_mat[j, i] = 1
                     num_edges += 1
@@ -518,7 +566,7 @@ class VMSI():
     def estimate_tau(self):
         """
 
-        estimate tension vector tau from vector t
+        Estimate tension vector tau, which is tangent to the edge
 
         """
 
@@ -551,6 +599,8 @@ class VMSI():
             r1[e,:] = v_coords[e_verts[0],:]
             r2[e,:] = v_coords[e_verts[1],:]
 
+            # If edge is curved, rotate t by pi/2 to get tau
+            # t is a vector between the centre of curvature and vertex
             if self.involved_edges[e] >= 0 and self.edges.at[self.involved_edges[e], 'radius'] < np.inf:
                 rho = self.edges.at[self.involved_edges[e], 'rho']
 
@@ -563,6 +613,7 @@ class VMSI():
                 else:
                     tau_1[e,:] = -np.matmul(np.array([[0,1],[-1,0]]), t1)
                     tau_2[e,:] = -np.matmul(np.array([[0,-1],[1,0]]), t2)
+            # If edge is straight, simply take the edge vector to get tau
             else:
                 tau_1[e,:] = -np.divide(e_chord[e,:], np.linalg.norm(e_chord[e,:]))
                 tau_2[e,:] = np.divide(e_chord[e,:], np.linalg.norm(e_chord[e,:]))
@@ -572,7 +623,15 @@ class VMSI():
     def estimate_pressure(self, q, e_cells, tau_1, tau_2, r1, r2):
         """
 
-        initial estimate of pressure
+        Initial estimate of pressure
+        This provides the initial values for the initial minimisation step
+
+        :param q: (numpy array) generating points q as defined under the VMSI formulation
+        :param e_cells: (numpy array) indexes of cell pairs at each edge
+        :param tau_1: (numpy array) unit tension vectors at vertex 1 for each edge
+        :param tau_2: (numpy array) unit tension vectors at vertex 2 for each edge
+        :param r1: (numpy array) co-ordinates of vertex 1 for each edge
+        :param r2: (numpy array) co-ordinates of vertex 2 for each edge
 
         """
 
@@ -589,6 +648,10 @@ class VMSI():
         b = np.zeros(2*L1.shape[0] + 1)
         b[-1] = scale
 
+        # Initial estimates generated by minimising sum of
+        # p_a((q_a-r_i) * tau_i) = p_b((q_b-r_i) * tau_i) for cells a and b at vertex i
+        # Overall scale maintained such that mean pressure = 1
+
         L = np.vstack((L1, L2, np.array(np.divide(np.ones(q.shape[0]), q.shape[0]))))
 
         p = np.linalg.lstsq(L,b)[0]
@@ -599,10 +662,11 @@ class VMSI():
     def generate_circular_arcs(self):
         """
 
-        construct circular arc for each edge and use these instead of raw segmented edges for minimization
+        Construct circular arc for each edge and use these instead of raw segmented edges for minimization
 
         """
 
+        # Each arc has a number of pixels equal to the average edge length
         self.avg_edge_length = int(np.median([self.edges.at[edge, 'pixels'].shape[0] for edge in self.involved_edges]))
         self.edgearc_x = np.zeros((len(self.involved_edges), self.avg_edge_length))
         self.edgearc_y = np.zeros((len(self.involved_edges), self.avg_edge_length))
@@ -610,6 +674,7 @@ class VMSI():
         for i in range(len(self.involved_edges)):
             r = np.array([self.vertices.at[self.edges.at[self.involved_edges[i], 'verts'][0], 'coords'],
                           self.vertices.at[self.edges.at[self.involved_edges[i], 'verts'][1], 'coords']])
+            # Construct circular arc for curved edges
             if self.edges.at[self.involved_edges[i], 'radius'] < np.inf:
                 r_centered = np.subtract(r, self.edges.at[self.involved_edges[i], 'rho'])
 
@@ -622,6 +687,7 @@ class VMSI():
 
                 self.edgearc_x[i] = self.edges.at[self.involved_edges[i], 'rho'][0] + (r_centered[0,0]*np.cos(theta_range) - r_centered[0,1]*np.sin(theta_range))
                 self.edgearc_y[i] = self.edges.at[self.involved_edges[i], 'rho'][1] + (r_centered[0,0]*np.sin(theta_range) + r_centered[0,1]*np.cos(theta_range))
+            # Construct straight line for straight edges
             else :
                 chord = r[1,:] - r[0,:]
 
@@ -671,7 +737,13 @@ class VMSI():
 
 
     def initial_minimization(self):
+        """
 
+        Initial minimisation step to ensure that vector t (between q_a and r_i for vertex i at cell a) is orthogonal
+        to tension vector tau.
+        This prevents the main minimisation step converging on the trivial solution q_a=q_b, p_a=p_b
+
+        """
         # Initialize q
         x0 = self.classify_cells()
 
@@ -695,11 +767,8 @@ class VMSI():
             import nlopt
             scale = 0.5 * (np.mean(np.linalg.norm(t1_0, axis=1)) + np.mean(np.linalg.norm(t2_0, axis=1)))
 
-            # Try NLopt
-    #        search_logfile = open('./nlopt_init_log.csv', 'a')
-    #        val_logfile = open('./nlopt_objval_log.csv', 'a')
+            # Define energy function for initial minimisation
             def energy(x, grad=np.array([])):
-    #            np.savetxt(search_logfile, x.reshape(1, x.shape[0]), delimiter=',',fmt='%f')
                 np.savetxt('./.init_opt.csv', x, delimiter=',',fmt='%f')
                 x = x.reshape(x0.shape, order='F')
                 q = x[:,0:2]
@@ -733,11 +802,11 @@ class VMSI():
                     dE = np.bincount(rows, weights=np.ravel(dE,order='F'))
                     grad[:] = dE
 
-    #            val_logfile.write(str(E) + '\n')
                 if self.verbose:
                     print(E)
                 return E
 
+            # Define nonlinear constraint for initial optimisation
             def nonlinear_con(x, grad=np.array([])):
                 x = x.reshape(x0.shape, order='F')
                 q = x[:,0:2]
@@ -770,6 +839,7 @@ class VMSI():
                     grad[:] = np.bincount(rows, weights=np.ravel(dE/self.dC.shape[0],order='F'))
                 return E
 
+            # Define linear constraint for initial optimisation
             def linear_con(x, grad=np.array([])):
                 Aeq = np.concatenate((np.zeros(x0.shape[0]*2), np.ones(x0.shape[0])))
                 E = np.dot(Aeq, x) - (np.mean(p0)*p0.shape[0])
@@ -778,6 +848,7 @@ class VMSI():
                     grad[:] = np.concatenate((np.zeros(2*x0.shape[0]), np.ones(x0.shape[0])))
                 return float(E)
 
+            # Configure optimiser
             local_opt = nlopt.opt(nlopt.LD_LBFGS, x0.size)
             init_opt = nlopt.opt(nlopt.AUGLAG, x0.size)
             init_opt.set_local_optimizer(local_opt)
@@ -788,8 +859,11 @@ class VMSI():
             init_opt.add_equality_constraint(linear_con, 1e-6)
             init_opt.set_maxeval(2000)
 
+            # Optimisation
             init_opt.optimize(x0.ravel(order='F'))
 
+            # For larger systems, the nlopt optimiser will not converge to the desired tolerance and does not return the results obtained at the final step
+            # To get around this, retrieve results from log file
             x = np.genfromtxt('.init_opt.csv', delimiter=',')
             x = x.reshape(x0.shape, order='F')
 
@@ -798,11 +872,11 @@ class VMSI():
 
             self.generate_circular_arcs()
 
+            # Once q, p are optimised, perform initial optimisation for theta
             theta0 = self.estimate_theta(x)
 
-    #        search_logfile = open('./nlopt_theta_log.csv', 'a')
+            # Define energy function for theta optimisation
             def theta_energy(theta, grad=np.array([])):
-    #            np.savetxt(search_logfile, theta.reshape(1, theta.shape[0]), delimiter=',',fmt='%f')
                 np.savetxt('./.theta_opt.csv', theta, delimiter=',',fmt='%f')
 
                 dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
@@ -847,6 +921,7 @@ class VMSI():
                     grad[:] = np.ones(theta0.shape[0])
                 return float(E)
 
+            # Define nonlinear constraint for theta optimisation
             def theta_neqlincon(result, theta, grad=np.array([])):
                 dP = p[self.cell_pairs[:,0]] - p[self.cell_pairs[:,1]]
                 dQ = q[self.cell_pairs[:,0],:] - q[self.cell_pairs[:,1],:]
@@ -864,6 +939,7 @@ class VMSI():
             if (theta_energy(np.zeros_like(theta0)) < theta_energy(theta0)):
                 theta0 = np.zeros_like(theta0)
 
+            # Configure optimiser
             theta_local_opt = nlopt.opt(nlopt.LD_LBFGS, theta0.size)
             theta_opt = nlopt.opt(nlopt.AUGLAG, theta0.size)
             theta_opt.set_local_optimizer(theta_local_opt)
@@ -875,11 +951,13 @@ class VMSI():
     #        theta_opt.add_equality_constraint(theta_eqlincon, 1e-5)
             theta_opt.set_maxeval(2000)
 
+            # Optimise
             theta_opt.optimize(theta0)
 
             theta = np.genfromtxt('.theta_opt.csv', delimiter=',')
             theta = np.array(theta)
         elif self.optimiser == 'matlab':
+            # Equivalent optimisation steps for matlab optimiser instead
             import matlab
             p_mat = matlab.double(p0.tolist())
             q_mat = matlab.double((q0).tolist())
@@ -934,10 +1012,7 @@ class VMSI():
 
         if self.optimiser == 'nlopt':
             import nlopt
-            # Try NLopt optimization (w/o analytic hessian)
-    #        search_logfile = open('./nlopt_main_log.csv', 'a')
             def objective(X, grad=np.array([])):
-    #           np.savetxt(search_logfile, X.reshape(1, X.shape[0]), delimiter=',',fmt='%f')
                 np.savetxt('./.main_opt.csv', X, delimiter=',',fmt='%f')
                 X = X.reshape(X0.shape, order='F')
 
@@ -1111,12 +1186,12 @@ class VMSI():
     def return_pressures(self):
         return self.cells.pressure.values[1:]
 
-    def compute_stresstensor(self, mode=0):
+    def compute_stresstensor(self):
         """
 
-        Compute stress tensor for each cell from tensions and pressures
+        Compute stress tensor for each cell from tensions and pressures.
+        This uses a small-angle approximation assuming edge curvatures are small.
 
-        :param mode: 0 or 1, specifies how calculation is performed
         """
 
         p = np.array([self.cells.at[cell, 'pressure'] for cell in self.involved_cells])
@@ -1140,63 +1215,70 @@ class VMSI():
 
         rv = np.array([self.vertices.at[vertex, 'coords'] for vertex in self.involved_vertices])
 
-        # Implement mode 0 first since that looks more sensible
-        if mode == 1:
-            sigma = np.zeros([len(self.bulk_cells),3])
-            for c in self.bulk_cells:
-                c_verts = self.cells.at[c, 'nverts']
-                for v in c_verts:
-                    r0 = rv[self.involved_vertices==v,:]
-        elif mode == 0:
-            rb = np.matmul(self.dV, rv)
-            D = np.sqrt(np.sum(np.power(rb, 2), 1))
-            D[D==0] = 1
-            rb = np.divide(rb.T, D).T
-            Rot = np.array([[0,-1],[1,0]])
-            nb = np.matmul(rb, Rot.T)
-            dP = np.matmul(self.dC, p)
 
-            sigmaB = np.zeros([rb.shape[0], 3])
-            sigmaB[:,0] = rb[:,0] * T * rb[:,0]
-            sigmaB[:,1] = rb[:,0] * T * rb[:,1]
-            sigmaB[:,2] = rb[:,1] * T * rb[:,1]
+        rb = np.matmul(self.dV, rv)
+        D = np.sqrt(np.sum(np.power(rb, 2), 1))
+        D[D==0] = 1
+        rb = np.divide(rb.T, D).T
+        Rot = np.array([[0,-1],[1,0]])
+        nb = np.matmul(rb, Rot.T)
+        dP = np.matmul(self.dC, p)
 
-            sigmaP = np.zeros([rb.shape[0], 3])
-            sigmaP[:,0] = nb[:,0] * dP * D * nb[:,0]
-            sigmaP[:,1] = nb[:,0] * dP * D * nb[:,1]
-            sigmaP[:,2] = nb[:,1] * dP * D * nb[:,1]
+        sigmaB = np.zeros([rb.shape[0], 3])
+        sigmaB[:,0] = rb[:,0] * T * rb[:,0]
+        sigmaB[:,1] = rb[:,0] * T * rb[:,1]
+        sigmaB[:,2] = rb[:,1] * T * rb[:,1]
 
-            sigma = np.matmul(np.abs(self.dC.T), sigmaB) + 0.5 * np.matmul(self.dC.T, sigmaP)
+        sigmaP = np.zeros([rb.shape[0], 3])
+        sigmaP[:,0] = nb[:,0] * dP * D * nb[:,0]
+        sigmaP[:,1] = nb[:,0] * dP * D * nb[:,1]
+        sigmaP[:,2] = nb[:,1] * dP * D * nb[:,1]
 
-            A = np.array(self.cells.area.to_list())[np.sort(self.involved_cells)]
-            sigma = np.divide(sigma.T, A)
-            for c in range(len(self.involved_cells)):
-                self.cells.at[self.involved_cells[c], 'stress'] = sigma[:,c]
+        sigma = np.matmul(np.abs(self.dC.T), sigmaB) + 0.5 * np.matmul(self.dC.T, sigmaP)
+
+        A = np.array(self.cells.area.to_list())[self.involved_cells]
+        sigma = np.divide(sigma.T, A)
+        for c in range(len(self.involved_cells)):
+            self.cells.at[self.involved_cells[c], 'stress'] = sigma[:,c]
+
         return
 
 
-    def plot(self, options='', mask=np.array([])):
+    def plot(self, options='', mask=np.array([]), line_thickness=5, size=10):
         """
-        :type options: list
-        :param mask: image on which to overlay plotted objects. If plotting pressure, must be labelled, segmented image.
-        :param options: list of options for plotting. Available options are: 'stress', 'pressure', 'tension', 'CAP'
 
+        Plots results of stress inference.
+
+        :param mask: (numpy array) image on which to overlay plotted objects. If plotting pressure, must be labelled, segmented image.
+        :param options: (list) list of options for plotting. Available options are: 'stress', 'pressure', 'tension', 'CAP'.
+        :param line_thickness: (int) thickness of lines used for tension and CAP plotting. Default: 5.
+        :param size: (int) text size for legends. Default: 10.
         """
         options = [option.lower() for option in options]
+
+        # Pressure first as requires remapping cell area colours
         if mask.size > 0:
             if np.isin('pressure', options):
-                colourmap = cm.get_cmap('viridis')
-                centroids = np.array(self.cells.centroids.tolist())[1:]
-                pressures = self.cells.pressure.to_numpy()
+                img = np.zeros_like(mask).astype(float)
+                colourmap = cm.get_cmap('plasma')
+                centroids = np.array(self.cells.loc[self.involved_cells, 'centroids'].tolist())
+                pressures = self.cells.pressure.to_numpy()[self.involved_cells]
+                props = measure.regionprops(mask)
                 img_centroids = np.array([np.flip(regionprops.centroid) for regionprops in measure.regionprops(mask)])
-                colours = [(0,0,0) for _ in range(img_centroids.shape[0])]
 
-                maxP = np.percentile(pressures, 99)
-
-                for i in range(centroids.shape[0]):
-                    img_index = int((np.where(centroids[i,0] == img_centroids[:,0]) and np.where(centroids[i,1] == img_centroids[:,1]))[0])
-                    colours[img_index] = colourmap(np.divide(pressures[i], maxP))
-                img = color.label2rgb(mask, mask, colors=colours, alpha=1)
+                maxP = np.percentile(pressures, 90)
+                indices = np.argmin(cdist(centroids, img_centroids), axis=1)
+                involvedcells_labels = np.zeros(len(self.involved_cells))
+                for i in range(len(self.involved_cells)):
+                    img_index = indices[i]
+                    img_label = props[img_index].label
+                    involvedcells_labels[i] = img_label
+                    p_norm = np.divide(pressures[i], maxP)
+                    if p_norm > 1:
+                        p_norm = 1
+                    img[mask==img_label] = p_norm
+                img = colourmap(img)
+                img[~np.isin(mask, involvedcells_labels),:] = (1,1,1,1)
             else:
                 colourmap = cm.get_cmap('Set3')
                 colours = np.array([colourmap(np.mod(i,12)) for i in range(len(np.unique(mask)))])
@@ -1204,10 +1286,11 @@ class VMSI():
         else:
             if np.isin('pressure', options):
                 return("Error: 'pressure' plotting specified without providing labelled, segmented image.")
-            mask = np.zeros((self.height, self.width))
+            mask = np.ones((self.height, self.width))
             # Need to map zeros to black otherwise background will be purple
-            img = color.label2rgb(mask, mask, colors=[(0,0,0)], alpha=1)
+            img = color.label2rgb(mask, mask, colors=[(1,1,1)], alpha=1)
 
+        # Set up figure
         fig, ax = plt.subplots(1,1,figsize=np.divide(mask.shape,72), dpi=72)
         ax.imshow(img)
         ax.spines['top'].set_visible(False)
@@ -1220,10 +1303,10 @@ class VMSI():
 
         # Now we add colourbar for pressure if it was specified
         if np.isin('pressure', options):
-            cax1 = divider.append_axes("right", size="5%", pad=1)
-            p_cb = plt.colorbar(mappable=cm.ScalarMappable(norm=colors.Normalize(np.min(pressures), np.max(pressures)), cmap=colourmap), cax=cax1)
-            p_cb.set_label('Pressure')
-            p_cb.ax.tick_params(labelsize='large')
+            cax1 = divider.append_axes("right", size="5%", pad=0.5)
+            p_cb = plt.colorbar(mappable=cm.ScalarMappable(norm=colors.Normalize(np.min(pressures), maxP), cmap=colourmap), cax=cax1)
+            p_cb.set_label('Pressure (a.u.)', size=size)
+            p_cb.ax.tick_params(labelsize=size)
 
         if all(np.isin(options, ['stress', 'pressure', 'tension', 'cap'])):
             for option in options:
@@ -1232,8 +1315,8 @@ class VMSI():
                     eigvals, eigvects = np.linalg.eig(stress)
                     scalefct = np.sqrt(np.median(np.multiply(eigvals[:,0], eigvals[:,1])))
 
-                    for i in range(len(self.cells)):
-                        cell = i
+                    for i in range(len(self.involved_cells)):
+                        cell = self.involved_cells[i]
                         if np.max(stress[i] > 0):
                             centroid = self.cells.at[cell, 'centroids']
                             eigval = eigvals[i,:]
@@ -1256,14 +1339,16 @@ class VMSI():
                             stress_ellipse = patches.Ellipse(centroid, eigval[0], eigval[1], theta, fill=False, color='red', lw=3)
                             ax.add_patch(stress_ellipse)
                 elif option == 'tension':
-                    maxT = np.percentile(self.return_tensions(), 99)
-                    minT = np.min(self.return_tensions())
-                    colourmap = cm.get_cmap('inferno')
+                    maxT = np.percentile(self.return_tensions(), 95)
+                    minT = np.percentile(self.return_tensions(), 1)
+                    colourmap = cm.get_cmap('hot')
 
                     for e in range(len(self.edges)):
                         if self.edges.at[e, 'tension'] > 0:
                             radius = self.edges.at[e, 'radius']
                             tension_norm = np.divide(self.edges.at[e, 'tension'], maxT-minT)
+                            if tension_norm > 1:
+                                tension_norm = 1
                             colour = colourmap(tension_norm)
 
                             if np.isinf(radius):
@@ -1271,7 +1356,7 @@ class VMSI():
                                 v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
                                 points = np.array([np.linspace(v[0,0], v[1,0], len(self.edges.at[e, 'pixels'])),
                                                    np.linspace(v[0,1], v[1,1], len(self.edges.at[e, 'pixels']))]).T
-                                ax.plot(points[:,0], points[:,1], lw=5, color=colour)
+                                ax.plot(points[:,0], points[:,1], lw=line_thickness, color=colour)
                             else:
                                 v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
                                 rho = self.edges.at[e, 'rho']
@@ -1286,11 +1371,11 @@ class VMSI():
                                 theta_range = np.linspace(theta[0], theta[1], len(self.edges.at[e, 'pixels']))
                                 points = np.array([rho[0] + radius*np.cos(theta_range),
                                                    rho[1] + radius*np.sin(theta_range)]).T
-                                ax.plot(points[:,0], points[:,1], lw=5, color=colour)
-                    cax2 = divider.append_axes("right", size="5%", pad=1)
+                                ax.plot(points[:,0], points[:,1], lw=line_thickness, color=colour)
+                    cax2 = divider.append_axes("right", size="5%", pad=0.5)
                     t_cb = plt.colorbar(mappable=cm.ScalarMappable(norm=colors.Normalize(minT, maxT), cmap=colourmap), cax=cax2)
-                    t_cb.set_label('Tension')
-                    t_cb.ax.tick_params(labelsize='large')
+                    t_cb.set_label('Tension (a.u.)', size=size)
+                    t_cb.ax.tick_params(labelsize=size)
                 elif option == 'cap':
                     for e in range(len(self.edges)):
                         radius = self.edges.at[e, 'radius']
@@ -1300,7 +1385,7 @@ class VMSI():
                             v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
                             points = np.array([np.linspace(v[0,0], v[1,0], len(self.edges.at[e, 'pixels'])),
                                                np.linspace(v[0,1], v[1,1], len(self.edges.at[e, 'pixels']))]).T
-                            ax.plot(points[:,0], points[:,1], lw=5, color='b')
+                            ax.plot(points[:,0], points[:,1], lw=line_thickness, color='b')
                         else:
                             v = np.array([self.vertices.at[self.edges.at[e, 'verts'][0], 'coords'], self.vertices.at[self.edges.at[e, 'verts'][1], 'coords']])
                             rho = self.edges.at[e, 'rho']
@@ -1315,109 +1400,169 @@ class VMSI():
                             theta_range = np.linspace(theta[0], theta[1], len(self.edges.at[e, 'pixels']))
                             points = np.array([rho[0] + radius*np.cos(theta_range),
                                                rho[1] + radius*np.sin(theta_range)]).T
-                            ax.plot(points[:,0], points[:,1], lw=5, color='b')
+                            ax.plot(points[:,0], points[:,1], lw=line_thickness, color='b')
         plt.show()
         return
 
-    def output_results(self, filename=None, metrics=None):
+    def smooth_stress(self, smoothsize=10):
         """
-        Outputs force inference and morphometric quantities.
-        @:param filename: filename to store metrics as csv. If None (default), a Pandas DataFrame of metrics is returned
-        @:param metrics: list of metrics to output.
-        """
-        if metrics is None:
-            metrics = ['centroids','pressure','stress','eccentricity','inertia','perimeter','axis_major','axis_minor','feret_d','equiv_diam_area','moments_hu','bbox','orientation', 'area']
-        out_df = self.cells.loc[self.involved_cells, metrics]
-        if 'centroids' in out_df.columns:
-            out_df['centroid_x'] = np.array(out_df['centroids'].tolist())[:,0]
-            out_df['centroid_y'] = np.array(out_df['centroids'].tolist())[:,1]
-            out_df.drop('centroids', axis=1, inplace=True)
-        if 'stress' in out_df.columns:
-            # We want each value to make sense on its own
-            # Therefore, compute eigenvalues, orientation and eccentricity of stress tensor
-            stress = np.array([np.array([[out_df.at[cell, 'stress'][0], out_df.at[cell, 'stress'][1]],[out_df.at[cell, 'stress'][1], out_df.at[cell, 'stress'][2]]]) for cell in out_df.index])
-            eigvals, eigvects = np.linalg.eig(stress)
-            eigvals = np.abs(eigvals)
-            idx = np.flip(np.argsort(eigvals, axis=1), axis=1)
-            eigvals = eigvals[np.arange(eigvals.shape[0])[:,None], idx]
-            eigvects = eigvects[np.arange(eigvects.shape[0])[:,None], idx]
-            out_df['stresstensor_eigval1'] = eigvals[:,0]
-            out_df['stresstensor_eigval2'] = eigvals[:,1]
-            # define orientation as absolute angle between largest eigenvector and x-axis
-            out_df['stresstensor_orientation'] = np.arctan2(np.abs(eigvects[:,0,:])[:,1], np.abs(eigvects[:,0,:])[:,0])
-            # define anisotropy as eccentricity of ellipse formed by eigenvectors of stress tensor
-            out_df['stresstensor_anisotropy'] = np.sqrt(1-np.divide(np.power(eigvals[:,1], 2), np.power(eigvals[:,0], 2)))
-            out_df.drop('stress', axis=1, inplace=True)
-        if 'inertia' in out_df.columns:
-            # We want each value to make sense on its own
-            # Therefore, compute eigenvalues, orientation and eccentricity of inertia tensor
-            inertia = np.array([np.array([[out_df.at[cell, 'inertia'][0], out_df.at[cell, 'inertia'][1]],[out_df.at[cell, 'inertia'][1], out_df.at[cell, 'inertia'][2]]]) for cell in out_df.index])
-            eigvals, eigvects = np.linalg.eig(inertia)
-            eigvals = np.abs(eigvals)
-            idx = np.flip(np.argsort(eigvals, axis=1), axis=1)
-            eigvals = eigvals[np.arange(eigvals.shape[0])[:,None], idx]
-            eigvects = eigvects[np.arange(eigvects.shape[0])[:,None], idx]
-            out_df['inertiatensor_eigval1'] = eigvals[:,0]
-            out_df['inertiatensor_eigval2'] = eigvals[:,1]
-            # define orientation as absolute angle between largest eigenvector and x-axis
-            out_df['inertiatensor_orientation'] = np.arctan2(np.abs(eigvects[:,0,:])[:,1], np.abs(eigvects[:,0,:])[:,0])
-            # define anisotropy as eccentricity of ellipse formed by eigenvectors of inertia tensor
-            out_df['inertiatensor_anisotropy'] = np.sqrt(1-np.divide(np.power(eigvals[:,1], 2), np.power(eigvals[:,0], 2)))
-            out_df.drop('inertia', axis=1, inplace=True)
-        if 'moments_hu' in out_df.columns:
-            # First three hu moments (translation, scale & rotation invariant image moments)
-            out_df['moments_hu_1'] = np.array(out_df['moments_hu'].tolist())[:,0]
-            out_df['moments_hu_2'] = np.array(out_df['moments_hu'].tolist())[:,1]
-            out_df['moments_hu_3'] = np.array(out_df['moments_hu'].tolist())[:,2]
-            out_df.drop('moments_hu', axis=1, inplace=True)
-        if 'bbox' in out_df.columns:
-            out_df['bbox_x'] = np.array(out_df['bbox'].tolist())[:,0]
-            out_df['bbox_y'] = np.array(out_df['bbox'].tolist())[:,1]
-            out_df.drop('bbox', axis=1, inplace=True)
-        if 'orientation' in out_df.columns:
-            # Compute orientation as absolute angle between x-axis and major axis of ellipse
-            # Cell orientation has no intrinsic directionality
-            out_df['orientation'] = np.abs(np.array(out_df['orientation'].tolist()))
 
-        if filename is not None:
-            out_df.to_csv(filename, sep=',',index=False)
-            return
-        else:
+        Compute smoothed stress tensor and stores it in the stress_smooth field
+        This reduces variability in stress between individual cells and makes it easier to spot tissue-wide trends
+
+        :param smoothsize: (int) Degree of smoothing; controls width of gaussian kernel over cell neighbours
+        """
+        self.cells['stress_smooth'] = [np.array([0,0,0]) for _ in range(self.cells.shape[0])]
+
+        rc = np.zeros((len(self.involved_cells), 2))
+        stress = np.zeros((len(self.involved_cells), 3))
+        for i in range(len(self.involved_cells)):
+            cell = self.involved_cells[i]
+            rc[i,:] = self.cells.at[cell, 'centroids']
+            stress[i,:] = self.cells.at[cell, 'stress']
+
+        # scaling factor based on mean cell area
+        A = np.array(self.cells.area.to_list()[1:])
+        r0 = 0.5 * np.mean(np.sqrt(np.divide(A, np.pi)))
+
+        dist = cdist(rc, rc)
+        smk = np.exp(-np.power(dist, 2)/(2*np.power(smoothsize*r0,2)))
+        smk = np.divide(smk, np.sum(smk, axis=1))
+
+        stress[:,0] = smk @ stress[:,0]
+        stress[:,1] = smk @ stress[:,1]
+        stress[:,2] = smk @ stress[:,2]
+
+        for i in range(len(self.involved_cells)):
+            cell = self.involved_cells[i]
+            self.cells.at[cell, 'stress_smooth'] = stress[i,:]
+        return
+
+    def output_results(self, metrics=['centroids','pressure','stress','inertia','perimeter','feret_d','moments_hu','bbox', 'area'], neighbours=False):
+        """
+        Outputs force inference/morphometric quantities and cell adjacency matrix as Pandas Dataframes.
+
+        :param metrics: (list) list of metrics to output. Default: all metrics.
+        :param neighbours: (bool) whether to output adjacency matrix. Nonzero values in matrix represent junction tension. Default: False.
+        """
+
+        # Assign actual id's to each cell instead of just using labels
+        cell_ids = {label:id for label, id in zip(self.involved_cells, ['cell_' + str(number+1) for number in range(len(self.involved_cells))])}
+
+        if metrics is not None:
+            out_df = self.cells.loc[self.involved_cells, metrics]
+            if 'centroids' in out_df.columns:
+                out_df['centroid_x'] = np.array(out_df['centroids'].tolist())[:,0]
+                out_df['centroid_y'] = np.array(out_df['centroids'].tolist())[:,1]
+                out_df.drop('centroids', axis=1, inplace=True)
+            if 'stress' in out_df.columns:
+                # We want each value to make sense on its own
+                # Therefore, compute eigenvalues, orientation and anisotropy of stress tensor
+                stress = np.array([np.array([[out_df.at[cell, 'stress'][0], out_df.at[cell, 'stress'][1]],[out_df.at[cell, 'stress'][1], out_df.at[cell, 'stress'][2]]]) for cell in out_df.index])
+                eigvals, eigvects = np.linalg.eig(stress)
+                eigvals = np.abs(eigvals)
+                idx = np.flip(np.argsort(eigvals, axis=1), axis=1)
+                eigvals = eigvals[np.arange(eigvals.shape[0])[:,None], idx]
+                eigvects = eigvects[np.arange(eigvects.shape[0])[:,None], idx]
+                out_df['stresstensor_eigval1'] = eigvals[:,0]
+                out_df['stresstensor_eigval2'] = eigvals[:,1]
+                # define orientation as absolute angle between largest eigenvector and x-axis
+                out_df['stresstensor_orientation'] = np.arctan2(np.abs(eigvects[:,0,:])[:,1], np.abs(eigvects[:,0,:])[:,0])
+                # define anisotropy using definition from Hartkamp et al., J. Chem. Phys. 2012
+                out_df['stresstensor_anisotropy'] = np.divide(eigvals[:,0] - eigvals[:,1], (eigvals[:,0] + eigvals[:,1]))
+                out_df.drop('stress', axis=1, inplace=True)
+            if 'inertia' in out_df.columns:
+                # We want each value to make sense on its own
+                # Therefore, compute eigenvalues, orientation and anisotropy of inertia tensor
+                inertia = np.array([np.array([[out_df.at[cell, 'inertia'][0], out_df.at[cell, 'inertia'][1]],[out_df.at[cell, 'inertia'][1], out_df.at[cell, 'inertia'][2]]]) for cell in out_df.index])
+                eigvals, eigvects = np.linalg.eig(inertia)
+                eigvals = np.abs(eigvals)
+                idx = np.flip(np.argsort(eigvals, axis=1), axis=1)
+                eigvals = eigvals[np.arange(eigvals.shape[0])[:,None], idx]
+                eigvects = eigvects[np.arange(eigvects.shape[0])[:,None], idx]
+                out_df['inertiatensor_eigval1'] = eigvals[:,0]
+                out_df['inertiatensor_eigval2'] = eigvals[:,1]
+                # define orientation as absolute angle between largest eigenvector and x-axis
+                out_df['inertiatensor_orientation'] = np.arctan2(np.abs(eigvects[:,0,:])[:,1], np.abs(eigvects[:,0,:])[:,0])
+                out_df['inertiatensor_anisotropy'] = np.divide(eigvals[:,0] - eigvals[:,1], (eigvals[:,0] + eigvals[:,1]))
+                out_df.drop('inertia', axis=1, inplace=True)
+            if 'moments_hu' in out_df.columns:
+                # Hu moments 1 and 3 (2 is omitted as it is equivalent to inertia tensor anisotropy)
+                out_df['moments_hu_1'] = np.array(out_df['moments_hu'].tolist())[:,0]
+                out_df['moments_hu_3'] = np.array(out_df['moments_hu'].tolist())[:,2]
+                out_df.drop('moments_hu', axis=1, inplace=True)
+            if 'bbox' in out_df.columns:
+                out_df['bbox_x'] = np.array(out_df['bbox'].tolist())[:,0]
+                out_df['bbox_y'] = np.array(out_df['bbox'].tolist())[:,1]
+                out_df.drop('bbox', axis=1, inplace=True)
+            out_df.rename(index=cell_ids, inplace=True)
+
+        if neighbours:
+            # Generate adjacency matrix.
+            # Magnitude of non-zero values represents the tension (in arbitrary units) along the junction.
+            adj_mat = pd.DataFrame(np.zeros([len(self.involved_cells), len(self.involved_cells)]), index=self.involved_cells, columns=self.involved_cells)
+
+            for cell in self.involved_cells:
+                adj_cells = self.cells.at[cell, 'ncells']
+                for adj_cell in adj_cells[np.isin(adj_cells, self.involved_cells)]:
+                    adj_mat.loc[cell, adj_cell] = self.edges[self.edges.cells.apply(tuple) == tuple(np.sort([cell, adj_cell]))]['tension'].values
+            adj_mat.rename(index=cell_ids, columns=cell_ids, inplace=True)
+
+        if neighbours and metrics:
+            return out_df, adj_mat
+        elif metrics is None:
+            return adj_mat
+        elif neighbours is None:
             return out_df
+        else:
+            return False
 
-def run_VMSI(img, is_labelled=False, holes_mask=None, tile=True, verbose=False, overlap=0.3, optimiser='nlopt'):
+def run_VMSI(img, is_labelled=False, holes_mask=None, tile=False, cells_per_tile=150, verbose=False, overlap=0.3, optimiser='nlopt'):
     """
-    Main function to run stress inference.
-    :param verbose: (bool) whether to provide detailed output.
+    Main function to run stress inference in a single step.
+
+    :param verbose: (bool) whether to provide detailed output. Default:False.
     :param img: (numpy array) segmented image.
-    :param is_labelled: (bool) whether all cells in image are labelled.
-    :param holes_mask: (numpy array) binary image containing interior holes in segmented image. None by default.
-    :param tile: (bool) whether to break image into tiles for faster inference. True by default.
-    :param overlap: (float) fraction of overlap between tiles.
+    :param is_labelled: (bool) whether all cells in image are labelled. Default: False.
+    :param holes_mask: (numpy array) binary image containing interior holes in segmented image. Default: None.
+    :param tile: (bool) whether to break image into tiles for faster inference. Not recommended for images with tissue-scale anisotropy. Default: False.
+    :param overlap: (float) fraction of overlap between tiles. Default: 0.3.
     :param optimiser: (str) which optimiser to use. Currently available options are 'nlopt' (default) , 'matlab'.
-    :return: VMSI object containing the inferred network.
+
+    :return: VMSI object containing the inferred tensions, pressures and stress, as well as cell morphology metrics.
     """
 
-    # TODO: process img to create single numpy array with integer values (i.e. deal with RGB masks)
     warnings.filterwarnings('ignore')
 
+    # If cells are not labelled, label them
+    if not is_labelled:
+        img = measure.label(img)
+    # Test whether there are enough cells to tile image
+    if not len(np.unique(img))-1 > 2*cells_per_tile and tile:
+        print('Not enough cells for tiling; proceeding with a single tile.')
+        tile = False
     if tile:
-        if not is_labelled:
-            img = measure.label(img)
-        tiles, offset, adj_tiles = create_image_tiles(img, overlap=overlap)
+
+        # Generating tiling
+        tiles, holes_masks, offset, adj_tiles = create_image_tiles(img, holes_mask, cells_per_tile=cells_per_tile, overlap=overlap)
         models = []
 
         pairwise_tensions = []
         pairwise_pressures = []
-        for tile in tiles:
+
+        # Iterate through each tile and do stress inference
+        for i in range(len(tiles)):
+            tile = tiles[i]
+            tile_holes_mask = holes_masks[i]
             # process segmented image for input into VMSI
             seg = Segmenter(masks=tile, labelled=is_labelled)
-            VMSI_obj, labelled_mask = seg.process_segmented_image(holes_mask=holes_mask)
+            VMSI_obj, labelled_mask = seg.process_segmented_image(holes_mask=tile_holes_mask)
             # create the model
             model = VMSI(vertices=VMSI_obj.V_df, cells=VMSI_obj.C_df, edges=VMSI_obj.E_df, height=tile.shape[0], width=tile.shape[1], verbose=verbose, optimiser=optimiser)
             # fit the model parameters
             model.fit()
             models.append(model)
+        # For each pair of adjacent tiles, determine cell overlap and record overlapping tensions and pressures
         for i in range(len(adj_tiles)):
             pair = adj_tiles[i]
             model_1 = models[pair[0]]
@@ -1428,9 +1573,9 @@ def run_VMSI(img, is_labelled=False, holes_mask=None, tile=True, verbose=False, 
             model2_cells = np.array(model_2.cells.centroids.tolist())[1:] + offset[pair[1]]
 
             cell_pwdist = cdist(model1_cells, model2_cells)
-            # We expect matching cells to have assigned centroids that are <=10px apart in the two tiles
-            # This may need to be changed depending on image size
-            matching_cells = np.where(cell_pwdist<=10)
+            # We expect matching cells to have assigned centroids that are <=2px apart in the two tiles
+            # This should be the same regardless of image size
+            matching_cells = np.where(cell_pwdist<=2)
             pressures = np.array([model_1.return_pressures()[matching_cells[0]], model_2.return_pressures()[matching_cells[1]]])
             pairwise_pressures.append(pressures[:,np.all(pressures>0, axis=0)])
 
@@ -1443,7 +1588,7 @@ def run_VMSI(img, is_labelled=False, holes_mask=None, tile=True, verbose=False, 
             r1_pwdist = cdist(model1_edge_r1, model2_edge_r1)
             r2_pwdist = cdist(model1_edge_r2, model2_edge_r2)
 
-            matching_edges = np.where(np.logical_and(r1_pwdist <= 10, r2_pwdist <= 10))
+            matching_edges = np.where(np.logical_and(r1_pwdist <= 2, r2_pwdist <= 2))
             tensions = np.array([model_1.return_tensions()[matching_edges[0]], model_2.return_tensions()[matching_edges[1]]])
             pairwise_tensions.append(tensions[:,np.all(tensions>0, axis=0)])
 
@@ -1475,57 +1620,110 @@ def run_VMSI(img, is_labelled=False, holes_mask=None, tile=True, verbose=False, 
         model.compute_stresstensor()
     return model
 
-def create_image_tiles(img, cells_per_tile=100, overlap=0.3):
-    ncells = len(measure.regionprops(img))
+def create_image_tiles(img, holes_mask, cells_per_tile=150, overlap=0.3):
+    """
 
-    if (ncells/cells_per_tile <= 2):
-        return 'Error: image is too small for tiling using the specified number of cells per tile'
-    else:
-        ntiles = 2*np.round(ncells/(2*cells_per_tile))
-        if ntiles == 2:
-            if img.shape[0] > img.shape[1]:
-                xsplits = 1
-                ysplits = 2
-            else:
-                xsplits = 2
-                ysplits = 1
+    Split image into overlapping tiles, each of which contain approximately the same number of cells.
+
+    :param img: (numpy array) labelled, segmented image to be split into tiles.
+    :param holes_mask: (numpy array) binary image containing interior holes in segmented image.
+    :param cells_per_tile: (int) number of cells per tile. Default: 150.
+    :param overlap: (float) fraction of overlap between each adjacent tiles. Default: 0.3.
+
+    :return tiles: (list) list of tiles of original image, where each tile is a numpy array.
+    :return holes_masks: (list) list of tiles of holes masks, where each tile is a numpy array.
+    :return offset: (list) offset between each tile's top left corner relative to the untiled image.
+    :return adj_tiles: (list) pairs of adjacent tiles with sufficient overlap to allow scaling after inference.
+    """
+    cell_properties = pd.DataFrame(measure.regionprops_table(img, properties=('label','bbox','centroid')))
+    ncells = cell_properties.shape[0]
+
+    # Get tile centres using K-means
+    ntiles = int(2*np.round(ncells/(2*cells_per_tile)))
+    cell_centroids = cell_properties[['centroid-0', 'centroid-1']].values
+    kmeans = KMeans(n_clusters=ntiles, random_state=0)
+    kmeans_res = kmeans.fit_predict(cell_centroids)
+
+    # Compute bounding box for each tile
+    tiles = []
+    holes_masks = []
+    offset = []
+    tiles_bbox = np.zeros([ntiles, 4], dtype=int)
+    for i in range(ntiles):
+        tile_index = np.unique(kmeans_res)[i]
+        cell_bbox = cell_properties[['bbox-0','bbox-1','bbox-2','bbox-3']].iloc[np.where(kmeans_res == tile_index)[0]].values
+        tile_bbox = np.array([np.min(cell_bbox[:,0]), np.min(cell_bbox[:,1]), np.max(cell_bbox[:,2]), np.max(cell_bbox[:,3])])
+        # Expand bounding box by overlap percentage (in each direction)
+        tile_bbox += np.round((overlap/2)*np.array([-(tile_bbox[3]-tile_bbox[1]), -(tile_bbox[2]-tile_bbox[0]), (tile_bbox[3]-tile_bbox[1]), (tile_bbox[2]-tile_bbox[0])])).astype(int)
+        tile_bbox = np.clip(tile_bbox, [0, 0, 0, 0], [img.shape[0], img.shape[1], img.shape[0], img.shape[1]])
+        tiles_bbox[i,:] = tile_bbox
+
+        tiles.append(img[tile_bbox[0]:tile_bbox[2], tile_bbox[1]:tile_bbox[3]])
+        if holes_mask is not None:
+            holes_masks.append(holes_mask[tile_bbox[0]:tile_bbox[2], tile_bbox[1]:tile_bbox[3]])
         else:
-            xsplits = int(np.round(np.sqrt(ntiles*img.shape[1]/img.shape[0])))
-            ysplits = int(np.round(xsplits * img.shape[0] / img.shape[1]))
+            holes_masks.append(None)
+        offset.append(np.array([tile_bbox[1], tile_bbox[0]]))
 
-        if xsplits*ysplits != ntiles:
-            return(f'Error! xsplits={xsplits} and ysplits={ysplits} do not make up {ntiles} tiles')
+    # Determine adjacent tiles using overlap; threshold by half overlap fraction multiplied by smallest tile area
+    adj_tiles = []
+    for tile_1 in range(ntiles):
+        for tile_2 in range(tile_1+1, ntiles):
+            bbox_1 = tiles_bbox[tile_1,:]
+            bbox_2 = tiles_bbox[tile_2,:]
+            if not (bbox_1[2]<bbox_2[0] or bbox_1[0]>bbox_2[2] or bbox_1[1]>bbox_2[3] or bbox_1[3]<bbox_2[1]):
+                # If there is overlap, determine overlap area
+                x_left = np.maximum(bbox_1[0], bbox_2[0])
+                y_top = np.maximum(bbox_1[1], bbox_2[1])
+                x_right = np.minimum(bbox_1[2], bbox_2[2])
+                y_bottom = np.minimum(bbox_1[3], bbox_2[3])
 
-        xstep = int(np.round(img.shape[1]/xsplits))
-        ystep = int(np.round(img.shape[0]/ysplits))
-        xoverlap = int(np.round(overlap * xstep))
-        yoverlap = int(np.round(overlap * ystep))
-        offset = []
-        tiles = []
-        adj_tiles = [[x*ysplits+y, (x+1)*ysplits+y] for x in range(xsplits-1) for y in range(ysplits)] + \
-                    [[x*ysplits+y, x*ysplits+y+1] for x in range(xsplits) for y in range(ysplits-1)]
+                # The intersection of two axis-aligned bounding boxes is always an axis-aligned bounding box
+                intersection_area = (x_right - x_left) * (y_bottom - y_top)
+                # Only use overlap that contains actual cells, not holes
+                intersection_area -= np.sum(holes_mask[x_left:x_right, y_top:y_bottom])
+                area_1 = (bbox_1[2] - bbox_1[0]) * (bbox_1[3] - bbox_1[1])
+                area_2 = (bbox_2[2] - bbox_2[0]) * (bbox_2[3] - bbox_2[1])
 
-        for i in range(xsplits):
-            for j in range(ysplits):
-                start_x = i*xstep
-                start_y = j*ystep
-                end_x = (i+1)*xstep
-                end_y = (j+1)*ystep
+                if intersection_area > (overlap/3)*np.minimum(area_1, area_2):
+                    adj_tiles.append([tile_1, tile_2])
 
-                if i != 0:
-                    start_x = start_x - xoverlap
-                if i != xsplits-1:
-                    end_x = end_x + xoverlap
-                if j != 0:
-                    start_y = start_y - yoverlap
-                if j != ysplits-1:
-                    end_y = end_y + yoverlap
 
-                tiles.append(img[start_y:end_y,start_x:end_x])
-                offset.append(np.array([start_x, start_y]))
-    return tiles, offset, adj_tiles
+    # Output tiling for debug
+    fig, ax = plt.subplots(1,1,figsize=np.divide(img.shape,72), dpi=72)
+    ax.imshow(img)
+    ax.spines['top'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for tile_index in range(tiles_bbox.shape[0]):
+        bbox = tiles_bbox[tile_index,:]
+        plt.hlines(bbox[0], bbox[1], bbox[3], linewidth=10, colors='black')
+        plt.hlines(bbox[2], bbox[1], bbox[3], linewidth=10, colors='black')
+        plt.vlines(bbox[1], bbox[0], bbox[2], linewidth=10, colors='black')
+        plt.vlines(bbox[3], bbox[0], bbox[2], linewidth=10, colors='black')
+    plt.tight_layout()
+    plt.show()
+    return tiles, holes_masks, offset, adj_tiles
+
 
 def merge_models(models, p_scale, t_scale, offset, img, verbose, holes_mask=None):
+    """
+
+    Merges VMSI objects created for each tile into a single object based on scaling factors calculated for tensions and pressures
+
+    :param models: (list) list of VMSI objects for each tile
+    :param p_scale: (numpy array) additive scaling factors for cell pressures for each tile.
+    :param t_scale: (numpy array) multiplicative scaling factors for junction tensions for each tile.
+    :param offset: (list) offset between each tile's top left corner relative to the untiled image.
+    :param img: (numpy array) labelled image.
+    :param verbose: (bool) output verbosity.
+    :param holes_mask: (numpy array) binary image containing interior holes in segmented image.
+
+    :return: single VMSI object containing inferred mechanics for the entire image.
+    """
     # process segmented image for input into VMSI
     seg = Segmenter(masks=img, labelled=True)
     VMSI_obj, labelled_mask = seg.process_segmented_image(holes_mask=holes_mask)

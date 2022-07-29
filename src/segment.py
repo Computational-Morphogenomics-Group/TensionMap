@@ -1,14 +1,6 @@
-import cv2
-import glob
 import matplotlib.pyplot as plt
 import numpy as np
-import skimage.draw
-from cellpose import models
-from cellpose import utils
-from cellpose import plot
 from scipy.ndimage import generic_filter
-import itertools
-from tqdm import tqdm
 from scipy.optimize import minimize, leastsq
 from scipy.spatial import ConvexHull
 import skimage.segmentation as seg
@@ -117,7 +109,11 @@ class Segmenter:
                 C_df.at[cell, 'nverts'] = np.append(C_df.at[cell, 'nverts'], np.array([V]))
 
         for C in range(len(C_df)):
-            ncells = np.setdiff1d(np.unique(np.hstack(V_df.loc[C_df.at[C, 'nverts'], 'ncells'].tolist())), C)
+            # If cell has no vertices, assume it must border the external cell only
+            if C_df.at[C, 'nverts'].size > 0:
+                ncells = np.setdiff1d(np.unique(np.hstack(V_df.loc[C_df.at[C, 'nverts'], 'ncells'].tolist())), C)
+            else:
+                ncells = np.array([0])
             C_df.at[C, 'ncells'] = ncells
 
         for i in range(v.shape[0]):
@@ -144,8 +140,8 @@ class Segmenter:
     def find_cells(self, mask):
         # Identify cells, record region information
         C_df = pd.DataFrame(columns = ['centroids','nverts','numv','ncells','edges', 'area', 'holes',\
-                                       'eccentricity', 'inertia', 'perimeter','axis_major','axis_minor','feret_d', \
-                                       'equiv_diam_area','moments_hu','bbox','orientation'])
+                                       'inertia', 'perimeter','feret_d', \
+                                       'moments_hu','bbox','orientation'])
 
         # regionprops returns the co-ordinates in numpy indexing rather than cartesian indexing - e.g.
         # (rows, cols) rather than (x, y) so flip
@@ -154,17 +150,17 @@ class Segmenter:
         ine = np.array([regionprops.inertia_tensor[np.triu_indices(2)] for regionprops in measure.regionprops(mask)])
         bbox = np.array([[regionprops.bbox[3]-regionprops.bbox[1],regionprops.bbox[2]-regionprops.bbox[0]] for regionprops in measure.regionprops(mask)])
         moments_hu = np.array([regionprops.moments_hu for regionprops in measure.regionprops(mask)])
-        cell_props = pd.DataFrame(measure.regionprops_table(mask, properties=('label','eccentricity','axis_major_length','axis_minor_length', \
-                                                                              'feret_diameter_max','equivalent_diameter_area','orientation','area')))
+        cell_props = pd.DataFrame(measure.regionprops_table(mask, properties=('label', \
+                                                                              'feret_diameter_max','orientation','area')))
 
         # estimate very_far to be the half the maximum cell perimeter
         self.very_far = np.max(p[1:])/2
 
         for i in range(c.shape[0]):
             cell_df = pd.DataFrame({'centroids':[c[i,:]],'nverts':[np.array([])],'numv':0,'ncells':[np.array([])], 'edges':[np.array([])], \
-                                    'area':cell_props.at[i,'area'], 'holes':False, 'eccentricity':cell_props.at[i,'eccentricity'], 'inertia':[ine[i]], \
-                                    'perimeter':p[i], 'axis_major':cell_props.at[i,'axis_major_length'],'axis_minor':cell_props.at[i,'axis_minor_length'], \
-                                    'feret_d':cell_props.at[i,'feret_diameter_max'],'equiv_diam_area':cell_props.at[i,'equivalent_diameter_area'], \
+                                    'area':cell_props.at[i,'area'], 'holes':False, 'inertia':[ine[i]], \
+                                    'perimeter':p[i], \
+                                    'feret_d':cell_props.at[i,'feret_diameter_max'], \
                                     'moments_hu':[moments_hu[i,:]],'bbox':[bbox[i,:]],'orientation':cell_props.at[i,'orientation']})
             C_df = pd.concat([C_df, cell_df], ignore_index=True)
         return C_df
@@ -231,12 +227,12 @@ class Segmenter:
                 v1 = np.argmin(D[end_points[0],:])
                 v2 = np.argmin(D[end_points[1],:])
                 if (v1 == v2):
-                    sort1 = np.sort(D[end_points[0],:])
-                    sort2 = np.sort(D[end_points[1],:])
+                    sort1 = np.sort(D[end_points[0],:]).squeeze()
+                    sort2 = np.sort(D[end_points[1],:]).squeeze()
                     if abs(sort1[0] - sort1[1]) <= np.sqrt(3):
-                        v1 = np.argsort(D[end_points[0],:])[0]
+                        v1 = np.argsort(D[end_points[0],:]).squeeze()[0]
                     elif abs(sort2[0] - sort2[1]) <= np.sqrt(3):
-                        v2 = np.argsort(D[end_points[1],:])[0]
+                        v2 = np.argsort(D[end_points[1],:]).squeeze()[0]
 
             if (v1 != -1) and (v2 != -1) and (v2 in obj.V_df.at[v1, 'nverts']) and ((v1 not in obj.C_df.at[0, 'nverts']) or (v2 not in obj.C_df.at[0, 'nverts'])):
                 pix = np.ravel_multi_index(np.flip(b_props[i-1].coords.T), mask.shape[::-1])
@@ -303,6 +299,7 @@ class Segmenter:
         :param use_model: which Cellpose neural network to use. 'default' - Cyto2, 'custom' - custom trained model.
         :return: segmented image
         """
+        from cellpose import models, utils, plot
         image = self.images.copy()
         image = image.astype(float)
 
