@@ -36,17 +36,18 @@ TensionMap can utilise optimisers from the Python implementation of the `NLopt` 
 
 To install the Matlab Engine API, first identify the folder where Matlab is installed. This can be found by opening Matlab and typing `matlabroot` into the console. 
 
-Next, execute the following commands for Linux/macOS:
+Next, execute the following commands, where `<matlabroot>` is the Matlab install directory.
+For Linux/macOS:
 
 ```
-cd "matlabroot/extern/engines/python"
+cd "<matlabroot>/extern/engines/python"
 python setup.py install
 ```
 
-or for Windows, execute these commands instead:
+For Windows:
 
 ```
-cd "matlabroot\extern\engines\python"
+cd "<matlabroot>\extern\engines\python"
 python setup.py install
 ```
 
