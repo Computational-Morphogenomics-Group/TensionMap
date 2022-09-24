@@ -481,8 +481,8 @@ class VMSI():
         boundary_cells = np.unique(np.concatenate([self.cells.at[0, 'ncells'], np.where(self.cells['holes'].to_numpy()[1:])[0]]))
 
         # Remove boundary cells and cells surrounded by boundary cells from bulk cells
-        all_threefold = np.array([not(any(self.vertices.loc[self.cells.at[cell, 'nverts'], 'fourfold'].to_numpy())) for cell in range(len(self.cells))])
-        self.bulk_cells = self.bulk_cells[all_threefold]
+#        all_threefold = np.array([not(any(self.vertices.loc[self.cells.at[cell, 'nverts'], 'fourfold'].to_numpy())) for cell in range(len(self.cells))])
+#        self.bulk_cells = self.bulk_cells[all_threefold]
         self.bulk_cells = self.bulk_cells[np.isin(self.bulk_cells, boundary_cells, invert=True)]
         bad_cells = np.array([])
         for cell in self.bulk_cells:
@@ -853,14 +853,17 @@ class VMSI():
             init_opt = nlopt.opt(nlopt.AUGLAG, x0.size)
             init_opt.set_local_optimizer(local_opt)
             init_opt.set_min_objective(energy)
-            init_opt.set_lower_bounds(np.concatenate((-np.inf*np.ones(x0.shape[0]), -np.inf*np.ones(x0.shape[0]), 0.001*np.ones(x0.shape[0]))))
-            init_opt.set_upper_bounds(np.concatenate((np.inf*np.ones(x0.shape[0]), np.inf*np.ones(x0.shape[0]), 2000*np.ones(x0.shape[0]))))
+            lb = np.concatenate((-np.inf*np.ones(x0.shape[0]), -np.inf*np.ones(x0.shape[0]), 0.001*np.ones(x0.shape[0])))
+            ub = np.concatenate((np.inf*np.ones(x0.shape[0]), np.inf*np.ones(x0.shape[0]), 2000*np.ones(x0.shape[0])))
+            init_opt.set_lower_bounds(lb)
+            init_opt.set_upper_bounds(ub)
             init_opt.add_inequality_constraint(nonlinear_con, 1e-6)
             init_opt.add_equality_constraint(linear_con, 1e-6)
             init_opt.set_maxeval(2000)
 
             # Optimisation
-            init_opt.optimize(x0.ravel(order='F'))
+            # Nlopt can't handle initial values outside bounds so clip values before optimisation
+            init_opt.optimize(np.clip(x0.ravel(order='F'), lb, ub))
 
             # For larger systems, the nlopt optimiser will not converge to the desired tolerance and does not return the results obtained at the final step
             # To get around this, retrieve results from log file
@@ -956,6 +959,7 @@ class VMSI():
 
             theta = np.genfromtxt('.theta_opt.csv', delimiter=',')
             theta = np.array(theta)
+
         elif self.optimiser == 'matlab':
             # Equivalent optimisation steps for matlab optimiser instead
             import matlab
@@ -1107,13 +1111,15 @@ class VMSI():
             main_opt = nlopt.opt(nlopt.AUGLAG, X0.size)
             main_opt.set_local_optimizer(local_opt)
             main_opt.set_min_objective(objective)
-            main_opt.set_lower_bounds(np.concatenate((-np.inf*np.ones(3*theta0.shape[0]), 0.001*np.ones(theta0.shape[0]))))
-            main_opt.set_upper_bounds(np.concatenate((np.inf*np.ones(3*theta0.shape[0]), 1000*np.ones(theta0.shape[0]))))
+            lb = np.concatenate((-np.inf*np.ones(3*theta0.shape[0]), 0.001*np.ones(theta0.shape[0])))
+            ub = np.concatenate((np.inf*np.ones(3*theta0.shape[0]), 1000*np.ones(theta0.shape[0])))
+            main_opt.set_lower_bounds(lb)
+            main_opt.set_upper_bounds(ub)
             main_opt.add_inequality_mconstraint(nonlinear_con, 1e-6*np.ones(self.dC.shape[0]))
             main_opt.add_equality_mconstraint(linear_con, 1e-6*np.ones(2))
             main_opt.set_maxeval(2000)
 
-            main_opt.optimize(X0.ravel(order='F'))
+            main_opt.optimize(np.clip(X0.ravel(order='F'),lb,ub))
 
             X = np.genfromtxt('.main_opt.csv', delimiter=',')
             X = X.reshape(X0.shape, order='F')
@@ -1244,7 +1250,7 @@ class VMSI():
         return
 
 
-    def plot(self, options='', mask=np.array([]), line_thickness=5, size=10):
+    def plot(self, options='', mask=np.array([]), line_thickness=5, size=10, file=None):
         """
 
         Plots results of stress inference.
@@ -1253,6 +1259,7 @@ class VMSI():
         :param options: (list) list of options for plotting. Available options are: 'stress', 'pressure', 'tension', 'CAP'.
         :param line_thickness: (int) thickness of lines used for tension and CAP plotting. Default: 5.
         :param size: (int) text size for legends. Default: 10.
+        :param file: (str) filename to save plot to. If none provided, outputs plot to console.
         """
         options = [option.lower() for option in options]
 
@@ -1401,7 +1408,10 @@ class VMSI():
                             points = np.array([rho[0] + radius*np.cos(theta_range),
                                                rho[1] + radius*np.sin(theta_range)]).T
                             ax.plot(points[:,0], points[:,1], lw=line_thickness, color='b')
-        plt.show()
+        if file is not None:
+            plt.savefig(filename)
+        else:
+            plt.show()
         return
 
     def smooth_stress(self, smoothsize=10):
@@ -1508,11 +1518,11 @@ class VMSI():
                     adj_mat.loc[cell, adj_cell] = self.edges[self.edges.cells.apply(tuple) == tuple(np.sort([cell, adj_cell]))]['tension'].values
             adj_mat.rename(index=cell_ids, columns=cell_ids, inplace=True)
 
-        if neighbours and metrics:
+        if neighbours and metrics is not None:
             return out_df, adj_mat
         elif metrics is None:
             return adj_mat
-        elif neighbours is None:
+        elif not neighbours:
             return out_df
         else:
             return False
