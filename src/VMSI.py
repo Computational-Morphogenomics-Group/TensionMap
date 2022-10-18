@@ -1409,7 +1409,9 @@ class VMSI():
                                                rho[1] + radius*np.sin(theta_range)]).T
                             ax.plot(points[:,0], points[:,1], lw=line_thickness, color='b')
         if file is not None:
-            plt.savefig(filename)
+            ax.set_facecolor((1,1,1))
+            ax.set_alpha(1.0)
+            plt.savefig(file, facecolor=ax.get_facecolor())
         else:
             plt.show()
         return
@@ -1448,7 +1450,7 @@ class VMSI():
             self.cells.at[cell, 'stress_smooth'] = stress[i,:]
         return
 
-    def output_results(self, metrics=['centroids','pressure','stress','inertia','perimeter','feret_d','moments_hu','bbox', 'area'], neighbours=False):
+    def output_results(self, metrics=['centroids','pressure','stress','inertia','perimeter','polygon_perimeter','feret_d','moments_hu','bbox', 'area','label'], neighbours=False):
         """
         Outputs force inference/morphometric quantities and cell adjacency matrix as Pandas Dataframes.
 

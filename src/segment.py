@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import skimage.morphology
 from scipy.ndimage import generic_filter
 from scipy.optimize import minimize, leastsq
 from scipy.spatial import ConvexHull
@@ -18,11 +19,12 @@ class VMSI_obj:
         self.E_df = []
 
 class Segmenter:
-    def __init__(self, images = None, masks = None, very_far = 150, labelled=False):
+    def __init__(self, images = None, masks = None, very_far = 300, labelled=False):
         """
-        :param masks: Numpy array - Segmented image with edges set to zero and cells set to non-zero. Edges must be 1px wide and 4-connected.
-        :param very_far: Int - Maximum distance between two vertices connected by the same edge.
-        :param labelled: Bool - Whether the segmented cells have been labelled.
+        :param: images: (Numpy array) Membrane-stained images to be segmented. WARNING: currently experimental and not working as intended. Default: None.
+        :param masks: (Numpy array) Segmented image with edges set to zero and cells set to non-zero. Edges must be 1px wide and 4-connected. Default: None.
+        :param very_far: (Int) Maximum distance in pixels between two vertices connected by the same edge. Default: 300.
+        :param labelled: (Bool) Whether the segmented cells have been labelled. Default: False.
         """
         self.images = []
         self.masks = []
@@ -40,7 +42,10 @@ class Segmenter:
         Given a segmented mask, produce VMSI_obj for input into VMSI
         """
 
+        # Before processing mask, obtain polygon perimeter and original image label for each cell
+        polygon_perimeter = self.polygon_perimeter()
         # Process mask
+
         # Clear border (create external cell from all cells that run into image boundary)
         tmp1 = seg.clear_border(self.masks)
         # If we are specifying holes, also set cells bordering holes as external cell
@@ -66,6 +71,12 @@ class Segmenter:
         obj = VMSI_obj()
 
         obj.C_df = self.find_cells(mask_tmp)
+        # Add polygon perimeter and cell label information to C_df
+
+        cell_pwdist = cdist(polygon_perimeter[['centroid_x','centroid_y']], np.array(obj.C_df['centroids'].tolist()))
+        matching_cells = np.where(cell_pwdist<=2)
+        obj.C_df.loc[obj.C_df.index.values[matching_cells[1]],['label','polygon_perimeter']] = polygon_perimeter[['label','polygon_perimeter']].values[matching_cells[0]]
+
         obj.V_df, cc = self.find_vertices(mask_tmp, obj.C_df)
         obj.E_df = self.find_edges(obj, mask_tmp, cc)
         self.identify_holes(obj)
@@ -119,7 +130,12 @@ class Segmenter:
         for i in range(v.shape[0]):
             for j in range(i+1,v.shape[0]):
                 if D[i,j] <= np.power(self.very_far, 2):
-                    if np.intersect1d(V_df['ncells'].iloc[i], V_df['ncells'].iloc[j]).size >=2:
+                    v1_ncells = V_df['ncells'].iloc[i]
+                    v1_ncells = v1_ncells[v1_ncells != 0]
+                    v2_ncells = V_df['ncells'].iloc[j]
+                    v2_ncells = v2_ncells[v2_ncells != 0]
+
+                    if np.intersect1d(v1_ncells, v2_ncells).size >=2:
                         adj[i,j] = 1
                         adj[j,i] = 1
             V_df['nverts'].iloc[i] = np.where(adj[i,:]==1)[0]
@@ -140,8 +156,8 @@ class Segmenter:
     def find_cells(self, mask):
         # Identify cells, record region information
         C_df = pd.DataFrame(columns = ['centroids','nverts','numv','ncells','edges', 'area', 'holes',\
-                                       'inertia', 'perimeter','feret_d', \
-                                       'moments_hu','bbox','orientation'])
+                                       'inertia', 'perimeter','polygon_perimeter','feret_d', \
+                                       'moments_hu','bbox','label'])
 
         # regionprops returns the co-ordinates in numpy indexing rather than cartesian indexing - e.g.
         # (rows, cols) rather than (x, y) so flip
@@ -150,8 +166,8 @@ class Segmenter:
         ine = np.array([regionprops.inertia_tensor[np.triu_indices(2)] for regionprops in measure.regionprops(mask)])
         bbox = np.array([[regionprops.bbox[3]-regionprops.bbox[1],regionprops.bbox[2]-regionprops.bbox[0]] for regionprops in measure.regionprops(mask)])
         moments_hu = np.array([regionprops.moments_hu for regionprops in measure.regionprops(mask)])
-        cell_props = pd.DataFrame(measure.regionprops_table(mask, properties=('label', \
-                                                                              'feret_diameter_max','orientation','area')))
+        cell_props = pd.DataFrame(measure.regionprops_table(mask, properties=('label', 'feret_diameter_max','area')))
+
 
         # estimate very_far to be the half the maximum cell perimeter
         self.very_far = np.max(p[1:])/2
@@ -159,9 +175,9 @@ class Segmenter:
         for i in range(c.shape[0]):
             cell_df = pd.DataFrame({'centroids':[c[i,:]],'nverts':[np.array([])],'numv':0,'ncells':[np.array([])], 'edges':[np.array([])], \
                                     'area':cell_props.at[i,'area'], 'holes':False, 'inertia':[ine[i]], \
-                                    'perimeter':p[i], \
+                                    'perimeter':p[i], 'polygon_perimeter':0, \
                                     'feret_d':cell_props.at[i,'feret_diameter_max'], \
-                                    'moments_hu':[moments_hu[i,:]],'bbox':[bbox[i,:]],'orientation':cell_props.at[i,'orientation']})
+                                    'moments_hu':[moments_hu[i,:]],'bbox':[bbox[i,:]],'label':0})
             C_df = pd.concat([C_df, cell_df], ignore_index=True)
         return C_df
 
@@ -274,6 +290,8 @@ class Segmenter:
                 theta = np.mod(np.arctan2(c_coords[:,1], c_coords[:,0]), 2*np.pi)
                 c_verts = c_verts[np.argsort(theta)]
                 c_verts = np.append(c_verts, c_verts[0])
+
+
                 if c not in obj.C_df.at[0, 'ncells']:
                     for v in range(0, len(c_verts)-1):
                         if (c_verts[v+1] in obj.V_df.at[c_verts[v], 'nverts']):
@@ -333,3 +351,36 @@ class Segmenter:
         segmented_image = masks
 
         return segmented_image
+
+    def polygon_perimeter(self):
+        """
+
+        Identify vertices and calculate polygon perimeter for each cell
+
+        :return:
+        """
+
+        branchpoints = self.find_branch_points(self.masks==0)
+        labels = np.unique(self.masks)
+        labels = labels[labels!=0]
+        res = pd.DataFrame(np.zeros([len(labels),1]), index=labels, columns=['polygon_perimeter'])
+
+        for label in res.index.values:
+            labelled_cell = self.masks==label
+            vertices = np.array(np.where((skimage.morphology.binary_dilation(labelled_cell, footprint=np.ones([3,3])) * branchpoints) > 0)).T
+
+            # calculate polygon perimeter
+            v_norm = vertices - np.mean(vertices, axis=0)
+            theta = np.mod(np.arctan2(v_norm[:,1], v_norm[:,0]), 2*np.pi)
+            vertices = vertices[np.argsort(theta),:]
+            perim = 0
+            for i in range(vertices.shape[0]):
+                v1 = vertices[i,:]
+                v2 = vertices[np.mod(i+1, vertices.shape[0]),:]
+                perim += np.linalg.norm(v1-v2)
+            res.at[label, 'polygon_perimeter'] = perim
+        centroids = pd.DataFrame(skimage.measure.regionprops_table(self.masks, properties=['label','centroid']))
+        centroids.columns = ['label','centroid_y','centroid_x']
+        centroids.index = centroids['label']
+        res = pd.concat([res, centroids], axis=1)
+        return res
