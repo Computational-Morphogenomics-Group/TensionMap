@@ -9,17 +9,19 @@ TensionMap is a Python library for force inference and morphometrics for membran
 
 ## Installation
 
-First, clone the Tensionmap repository to your local machine, where `tensionmap_dir` is a directory of your choice:
+First, clone the Tensionmap repository to your local machine, where `<tensionmap_dir>` is a directory of your choice:
 
 ```
 git clone --branch TensionMap-new https://github.com/Computational-Morphogenomics-Group/TensionMap.git <tensionmap_dir>
 ```
 
-The requirements to run TensionMap alone can be found in `tensionmap_minimal.yml`. Create a conda environment with the required dependencies using
+The requirements to run TensionMap alone can be found in `tensionmap-minimal.yml`. Create a conda environment with the required dependencies using:
 
 ```
-conda env create -f tensionmap_minimal.yml -n tensionmap
+conda env create -f tensionmap-minimal.yml -n tensionmap
 ```
+
+To run the other post-inference analysis scripts found in the Tutorials section, create a conda environment using `tensionmap-full.yml` instead. This installs libraries for integrated analysis with gene expression data, such as `scanpy` and `MUSE`.
 
 You can activate the environment using `conda activate tensionmap`. To use TensionMap in a python script, first add the `src` directory to `sys.path`, then import as normal:
 
