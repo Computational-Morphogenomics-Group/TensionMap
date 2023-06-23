@@ -3,7 +3,7 @@
 TensionMap is a Python library for force inference and morphometrics for membrane-stained tissue images. Given a segmented, labelled cell array image, TensionMap can:
 
 - Infer cell pressure and cell-cell junction tension using a python implementation of the VMSI method (see *Noll et al., 2020*).
-- Measure 11 morphometric quantities for each cell.
+- Measure 13 morphometric quantities for each cell.
 - Visualise results of force inference.
 - Output morphomtric and mechanical features for integration with gene expression data and further analysis.
 
@@ -21,7 +21,7 @@ The requirements to run TensionMap alone can be found in `tensionmap-minimal.yml
 conda env create -f tensionmap-minimal.yml -n tensionmap
 ```
 
-To run the other post-inference analysis scripts found in the Tutorials section, create a conda environment using `tensionmap-full.yml` instead. This installs libraries for integrated analysis with gene expression data, such as `scanpy` and `MUSE`.
+To run the other post-inference analysis scripts found in the Tutorials section, create a conda environment using `tensionmap-full.yml` instead. This installs libraries for integrated analysis with gene expression data, such as `scanpy` and `Phenograph`.
 
 You can activate the environment using `conda activate tensionmap`. To use TensionMap in a python script, first add the `src` directory to `sys.path`, then import as normal:
 
