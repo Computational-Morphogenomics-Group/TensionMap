@@ -34,7 +34,7 @@ from src.VMSI import *
 
 ### Optional: Matlab `fmincon` optimiser
 
-TensionMap can utilise optimisers from the Python implementation of the `NLopt` library or Matlab's `fmincon`, used in the original manuscript of *Noll et al., 2020*. To enable `fmincon` for TensionMap, a licensed installation of Matlab is needed, and the Matlab Engine API for Python must be installed. Full instructions for this installation can be found [here](https://mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html).
+TensionMap can utilise optimisers from the Python implementation of the `NLopt` library or Matlab's `fmincon`, used in the original manuscript of *Noll et al., 2020*. To enable `fmincon` for TensionMap, a licensed installation of Matlab is needed, and the Matlab Engine API for Python must be installed. Full instructions can be found [here](https://mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html).
 
 To install the Matlab Engine API, first identify the folder where Matlab is installed. This can be found by opening Matlab and typing `matlabroot` into the console. 
 
