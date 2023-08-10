@@ -7,6 +7,13 @@ TensionMap is a Python library for force inference and morphometrics for membran
 - Visualise results of force inference.
 - Output morphomtric and mechanical features for integration with gene expression data and further analysis.
 
+## Table of Contents
+1. [Installation](##installation)
+2. [Tutorials and examples](##tutorials-and-examples)
+3. [Quickstart](##quickstart)
+4. [Features](#features)
+5. [License](#license)
+
 ## Installation
 
 First, clone the Tensionmap repository to your local machine, where `<tensionmap_dir>` is a directory of your choice:
