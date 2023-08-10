@@ -58,12 +58,14 @@ Note that you may need to use `python3` instead of `python` if you have both Pyt
 
 ## Tutorials and examples
 
-#### Running the TensionMap pipeline
+#### Basic tutorial
 [Running pipeline on synthetic image and basic analysis](notebooks/synthetic_image.ipynb) <br />
 
-#### Integrative mechano-transcriptomic analysis on TensionMap output
-[Analysis of homotypic and heterotypic tension at tissue boundaries](notebooks/01_biophysical_analysis.ipynb) <br />
-[Single-cell ligand-receptor communication analysis](notebooks/02_lr_analysis.ipynb)
+#### Reproducing further analysis from manuscript 
+[Characterising mechanical properties of tissue boundaries](notebooks/01_biophysical_analysis.ipynb) <br />
+[Identifying putative ligand-receptor signalling across boundaries](notebooks/02_lr_analysis.ipynb) <br />
+[Testing for associations between gene expression and cellular mechanics using a spatial regression model](notebooks/03_spatial_regression.ipynb) <br />
+[Identifying nonlinear association patterns between gene expression and cellular mechanics](notebooks/04_nonlinear_schot.ipynb) <br />
 
 ## Quickstart
 
