@@ -5,7 +5,7 @@ TensionMap is a Python library for force inference and morphometrics for membran
 - Infer cell pressure and cell-cell junction tension using a python implementation of the VMSI method.
 - Visualise results of force inference.
 - Output morphomtric and mechanical features for integration with gene expression data and further analysis.
-- Perform additional analysis of mechanical properties of tissue boundaries and associations between gene expression and mechanics
+- Perform additional analysis of mechanical properties of tissue boundaries and associations between gene expression and mechanics.
 
 ## Table of Contents
 1. [Installation](##installation)
