@@ -1,6 +1,6 @@
 # TensionMap
 
-TensionMap is a Python library for image-based force inference, cell morphometrics and spatial omics data integration. Given a spatial omics data set at cellular resolution (seqFISH, MERFISH, cosMx, etc.) and accurate segmentation of cell contours on the basis of a cell membrane staining TensionMap can:
+TensionMap is a Python library for image-based force inference, cell morphometrics and spatial omics data integration. Given an image-based spatial omics data set (seqFISH, MERFISH, cosMx, etc.) and accurate segmentation masks of cell contours TensionMap can:
 
 - Infer cell pressure, tension at cell-cell junctions and cellular stress tensor using a python implementation of the VMSI force inference method.
 - Visualise results of force inference.
@@ -10,10 +10,13 @@ TensionMap is a Python library for image-based force inference, cell morphometri
   ii - spatial ligand-receptor analysis,
   iii - geoadditive structural equation models and non-linear association models for detecting gene expression modules associated with cellular mechanics.
 
+Reference 
+Adrien Hallou, Ruiyang He, Benjamin David Simons and Bianca Dumitrascu. A computational pipeline for spatial mechano-transcriptomics. bioRxiv 2023.08.03.551894; doi: https://doi.org/10.1101/2023.08.03.551894
+
 ## Table of Contents
-1. [Installation](##installation)
-2. [Tutorials and examples](##tutorials-and-examples)
-3. [Quickstart](##quickstart)
+1. [Installation](#installation)
+2. [Tutorials and examples](#tutorials-and-examples)
+3. [Quickstart](#quickstart)
 4. [Features](#features)
 5. [License](#license)
 
@@ -31,7 +34,7 @@ The requirements to run TensionMap alone can be found in `tensionmap-minimal.yml
 conda env create -f tensionmap-minimal.yml -n tensionmap
 ```
 
-To run the other post-inference analysis scripts found in the Tutorials section, create a conda environment using `tensionmap-full.yml` instead. This installs libraries for integrated analysis with gene expression data, such as `scanpy` and `Phenograph`.
+To run the other post force inference analysis scripts found in the Tutorials section, create a conda environment using `tensionmap-full.yml` instead. This installs libraries for integrated analysis with gene expression data, such as `scanpy` and `Phenograph`.
 
 You can activate the environment using `conda activate tensionmap`. To use TensionMap in a python script, first add the `src` directory to `sys.path`, then import as normal:
 
@@ -44,11 +47,12 @@ from src.VMSI import *
 
 ### Optional: Matlab `fmincon` optimiser
 
-TensionMap can utilise optimisers from the Python implementation of the `NLopt` library or Matlab's `fmincon`, used in the original manuscript of *Noll et al., 2020*. To enable `fmincon` for TensionMap, a licensed installation of Matlab is needed, and the Matlab Engine API for Python must be installed. Full instructions can be found [here](https://mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html).
+TensionMap can use optimisers from the Python implementation of the `NLopt` library or Matlab's `fmincon`. To enable `fmincon` for TensionMap, a licensed installation of Matlab is needed, and the Matlab Engine API for Python must be installed. Full instructions can be found [here](https://mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html).
 
 To install the Matlab Engine API, first identify the folder where Matlab is installed. This can be found by opening Matlab and typing `matlabroot` into the console. 
 
 Next, execute the following commands, where `<matlabroot>` is the Matlab install directory.
+
 For Linux/macOS:
 
 ```
@@ -65,13 +69,12 @@ python setup.py install
 
 Note that you may need to use `python3` instead of `python` if you have both Python 2 and Python 3 installed.
 
-
 ## Tutorials and examples
 
 #### Basic tutorial
 [Running pipeline on synthetic image and basic analysis](notebooks/synthetic_image.ipynb) <br />
 
-#### Reproducing further analysis from manuscript 
+#### Reproducing further mechano-transcriptomics analysis from the manuscript 
 [Characterising mechanical properties of tissue boundaries](notebooks/01_biophysical_analysis.ipynb) <br />
 [Identifying putative ligand-receptor signalling across boundaries](notebooks/02_lr_analysis.ipynb) <br />
 [Testing for associations between gene expression and cellular mechanics using a spatial regression model](notebooks/03_spatial_regression.ipynb) <br />
