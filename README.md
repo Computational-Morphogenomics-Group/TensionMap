@@ -1,23 +1,26 @@
 # TensionMap
 
-TensionMap is a Python library for image-based force inference, cell morphometrics and spatial omics data integration. Given an image-based spatial omics data set (seqFISH, MERFISH, cosMx, etc.) and accurate segmentation masks of cell contours TensionMap can:
+TensionMap is a Python library for spatial mechano-transcriptomics allowing for image-based force inference, cell morphometrics and spatial omics data integration. Given an image-based spatial omics data set (seqFISH, MERFISH, cosMx, etc.) and accurate segmentation masks of cell contours TensionMap can:
 
-- Infer cell pressure, tension at cell-cell junctions and cellular stress tensor using a python implementation of the VMSI force inference method.
+- Infer cell pressure, tension at cell-cell junctions and cellular stress tensor using a python-based force inference method.
 - Visualise results of force inference.
 - Output cell and tissue level mechanical features for integration with spatial omics data.
-- Perform mechano-transcriptomics analysis such as: 
-  i- tissue compartment boundary detection,
-  ii - spatial ligand-receptor analysis,
-  iii - geoadditive structural equation models and non-linear association models for detecting gene expression modules associated with cellular mechanics.
+- Perform mechano-transcriptomics analysis including:
+  - tissue compartment boundary detection;
+  - spatial ligand-receptor analysis;  
+  - non-linear association models for detecting gene expression modules associated with cellular mechanics;
+  - geoadditive structural equation models for detecting gene expression modules associated with cellular mechanics while controlling for spatial confounders.
+    
+## Reference
 
-Reference 
 Adrien Hallou, Ruiyang He, Benjamin David Simons and Bianca Dumitrascu. A computational pipeline for spatial mechano-transcriptomics. bioRxiv 2023.08.03.551894; doi: https://doi.org/10.1101/2023.08.03.551894
 
 ## Table of Contents
+
 1. [Installation](#installation)
 2. [Tutorials and examples](#tutorials-and-examples)
 3. [Quickstart](#quickstart)
-4. [Features](#features)
+4. [Notes and frequently encountered issues](#notes-and-frequently-encountered-issues)
 5. [License](#license)
 
 ## Installation
@@ -120,8 +123,12 @@ vmsi_model.plot(['tension','pressure', 'stress'], img)
 results = vmsi_model.output_results()
 ```
 
-## Notes/Frequently encountered issues
+## Notes and frequently encountered issues
 
 - Inference is dependent on a high-quality segmentation; a common issue that can result in errors is segmentation artifacts resulting from manual segmentations. 
 
 - Image tiling may lead to unexpected results and is not recommended for images which exhibit significant spatial anisotropy in cell morphology.
+
+## License 
+
+- This project is licensed under the terms of the MIT License.
