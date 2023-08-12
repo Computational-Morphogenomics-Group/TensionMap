@@ -1,11 +1,14 @@
 # TensionMap
 
-TensionMap is a Python library for force inference and morphometrics for membrane-stained tissue images. Given a segmented, labelled cell array image, TensionMap can:
+TensionMap is a Python library for image-based force inference, cell morphometrics and spatial omics data integration. Given a spatial omics data set at cellular resolution (seqFISH, MERFISH, cosMx, etc.) and accurate segmentation of cell contours on the basis of a cell membrane staining TensionMap can:
 
-- Infer cell pressure and cell-cell junction tension using a python implementation of the VMSI method.
+- Infer cell pressure, tension at cell-cell junctions and cellular stress tensor using a python implementation of the VMSI force inference method.
 - Visualise results of force inference.
-- Output morphomtric and mechanical features for integration with gene expression data and further analysis.
-- Perform additional analysis of mechanical properties of tissue boundaries and associations between gene expression and mechanics.
+- Output cell and tissue level mechanical features for integration with spatial omics data.
+- Perform mechano-transcriptomics analysis such as: 
+  i- tissue compartment boundary detection,
+  ii - spatial ligand-receptor analysis,
+  iii - geoadditive structural equation models and non-linear association models for detecting gene expression modules associated with cellular mechanics.
 
 ## Table of Contents
 1. [Installation](##installation)
@@ -16,7 +19,7 @@ TensionMap is a Python library for force inference and morphometrics for membran
 
 ## Installation
 
-First, clone the Tensionmap repository to your local machine, where `<tensionmap_dir>` is a directory of your choice:
+First, clone the TensionMap repository to your local machine, where `<tensionmap_dir>` is a directory of your choice:
 
 ```
 git clone --branch TensionMap-new https://github.com/Computational-Morphogenomics-Group/TensionMap.git <tensionmap_dir>
