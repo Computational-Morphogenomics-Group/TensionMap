@@ -13,7 +13,7 @@ TensionMap is a Python library for spatial mechano-transcriptomics allowing for 
     
 ## Reference
 
-Adrien Hallou, Ruiyang He, Benjamin David Simons and Bianca Dumitrascu. A computational pipeline for spatial mechano-transcriptomics. bioRxiv 2023.08.03.551894; doi: https://doi.org/10.1101/2023.08.03.551894
+Adrien Hallou, Ruiyang He, Benjamin D. Simons and Bianca Dumitrascu. A computational pipeline for spatial mechano-transcriptomics. bioRxiv 2023.08.03.551894; doi: https://doi.org/10.1101/2023.08.03.551894
 
 ## Table of Contents
 
@@ -75,9 +75,10 @@ Note that you may need to use `python3` instead of `python` if you have both Pyt
 ## Tutorials and examples
 
 #### Basic tutorial
-[Running pipeline on synthetic image and basic analysis](notebooks/synthetic_image.ipynb) <br />
+[Running pipeline on synthetic image and basic analysis](notebooks/tensionmap_example.ipynb) <br />
 
-#### Reproducing further mechano-transcriptomics analysis from the manuscript 
+#### Reproducing further mechano-transcriptomics analysis from the manuscript
+[Run TensionMap on segmented tissue image](notebooks/00_run_tensionmap.ipynb) <br />
 [Characterising mechanical properties of tissue boundaries](notebooks/01_biophysical_analysis.ipynb) <br />
 [Identifying putative ligand-receptor signalling across boundaries](notebooks/02_lr_analysis.ipynb) <br />
 [Testing for associations between gene expression and cellular mechanics using a spatial regression model](notebooks/03_spatial_regression.ipynb) <br />
