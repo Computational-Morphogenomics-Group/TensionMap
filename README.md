@@ -75,7 +75,7 @@ Note that you may need to use `python3` instead of `python` if you have both Pyt
 ## Tutorials and examples
 
 #### Basic tutorial
-[Running pipeline on synthetic image and basic analysis](notebooks/tensionmap_example.ipynb) <br />
+[Run TensionMap on synthetic image and perform basic further analysis](notebooks/tensionmap_example.ipynb) <br />
 
 #### Reproducing further mechano-transcriptomics analysis from the manuscript
 1. [Run TensionMap on segmented tissue image](notebooks/00_run_tensionmap.ipynb) <br />
