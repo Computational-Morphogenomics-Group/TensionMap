@@ -4,7 +4,6 @@ import numpy as np
 from skimage.measure import regionprops
 from scipy.spatial.distance import cdist
 from scipy.stats import ranksums
-import qnorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib import cm
 import matplotlib.patches as mpatches
@@ -112,8 +111,7 @@ def tension_lineplot(boundary_tensions, boundary_celltypes, xlim=None):
     ax.fill_between(tensions_summary.index.values, tensions_summary['ci95_lo'], tensions_summary['ci95_hi'], alpha=0.5, color='r')
 
     ax.vlines(0, 0, 1000)
-#    ax.set_ylim((0.9*np.min(tensions_summary['ci95_lo']),1.1*np.max(tensions_summary['ci95_hi'])))
-    ax.set_ylim((120,225))
+    ax.set_ylim((0.9*np.min(tensions_summary['ci95_lo']),1.1*np.max(tensions_summary['ci95_hi'])))
     if not xlim is None:
         ax.set_xlim(xlim)
     fig.canvas.draw()
@@ -260,14 +258,13 @@ def gex_lineplot(gene, tensionmap_res, boundary_celltypes, distance_to_boundary,
     ax.set_yticklabels([])
     ax.tick_params(bottom = False)
     plt.subplots_adjust(wspace=0, hspace=0)
-    plt.close(fig)
-    return fig
+    plt.show()
+    return
 
 def test_interactions(lr_pairs, gex_res, cellpair_metadata, boundary_celltypes):
     res = pd.DataFrame(np.zeros([lr_pairs.shape[0], 10]), columns=['source_gene','target_gene','ab_vs_aa_pval','ab_vs_aa_stat','ab_vs_bb_pval','ab_vs_bb_stat','ba_vs_aa_pval','ba_vs_aa_stat','ba_vs_bb_pval','ba_vs_bb_stat'])
     celltype_1 = boundary_celltypes[0]
     celltype_2 = boundary_celltypes[1]
-#    gex_res_norm = qnorm.quantile_normalize(gex_res, axis=0)
     gex_res_norm = gex_res
 
     for i in tqdm(range(lr_pairs.shape[0])):
@@ -319,7 +316,6 @@ def get_potential(group1_cells, group2_cells, gene1_expr_norm, gene2_expr_norm):
 def generate_boxplot(source_gene, target_gene, gex_res, cellpair_metadata, boundary_celltypes, celltype_alias=None):
     celltype_1 = boundary_celltypes[0]
     celltype_2 = boundary_celltypes[1]
-#    gex_res_norm = qnorm.quantile_normalize(gex_res, axis=0)
     gex_res_norm = gex_res
 
     gene1_expr = pd.DataFrame(data=np.expand_dims(gex_res_norm.loc[source_gene,:].values,1), columns=['normalised'], index=gex_res_norm.columns)
@@ -342,69 +338,3 @@ def generate_boxplot(source_gene, target_gene, gex_res, cellpair_metadata, bound
 
     p.set(ylabel='Junction interaction potential', title=f'{source_gene} -> {target_gene}')
     return p
-
-# Linear regression functions
-
-def linear_regressions(y, x):
-    """
-
-    :param y: GeX data, n. genes by n. cells
-    :param x: force features, n. cells by n. features
-    """
-    y = y[y.var(axis=1) > 0]
-
-    df_res = pd.DataFrame(np.zeros([y.shape[0],6]), columns=['p_tstat','p_pval','p_beta','sm_tstat','sm_pval','sm_beta'])
-    df_res.index = y.index
-
-    perm_res = pd.DataFrame(np.zeros([y.shape[0],6]), columns=['p_tstat','p_pval','p_beta','sm_tstat','sm_pval','sm_beta'])
-    perm_res.index = y.index
-
-    for gene in tqdm(y.index.values):
-        y_i = y.loc[gene,:].values
-
-        p_indep_vars = sm.add_constant(np.log(x['pressure'].values))
-        sm_indep_vars = sm.add_constant(np.log(x['stresstensor_magnitude'].values))
-
-        # Set up univariate regressions
-        p_model = sm.OLS(y_i, p_indep_vars).fit()
-        sm_model = sm.OLS(y_i, sm_indep_vars).fit()
-
-        df_res.loc[gene, 'p_tstat'] = p_model.tvalues[1]
-        df_res.loc[gene, 'p_pval'] = p_model.pvalues[1]
-        df_res.loc[gene, 'p_beta'] = p_model.params[1]
-        df_res.loc[gene, 'sm_tstat'] = sm_model.tvalues[1]
-        df_res.loc[gene, 'sm_pval'] = sm_model.pvalues[1]
-        df_res.loc[gene, 'sm_beta'] = sm_model.params[1]
-
-
-        # Do permuted gene expression
-        y_i_perm = np.random.permutation(y_i)
-        p_perm_model = sm.OLS(y_i_perm, p_indep_vars).fit()
-        sm_perm_model = sm.OLS(y_i_perm, sm_indep_vars).fit()
-
-        perm_res.loc[gene, 'p_tstat'] = p_perm_model.tvalues[1]
-        perm_res.loc[gene, 'p_pval'] = p_perm_model.pvalues[1]
-        perm_res.loc[gene, 'sm_tstat'] = sm_perm_model.tvalues[1]
-        perm_res.loc[gene, 'sm_pval'] = sm_perm_model.pvalues[1]
-        perm_res.loc[gene, 'p_beta'] = p_perm_model.params[1]
-        perm_res.loc[gene, 'sm_beta'] = sm_perm_model.params[1]
-
-    return df_res, perm_res
-
-def reg_plot(gene, force_metric, cells, file=None):
-    force = combined_data.loc[cells,force_metric].values
-    force = np.log(force)
-    gex = gex_res.loc[gene,cells].values
-    # rerun regression
-    model = sm.OLS(gex, sm.add_constant(force)).fit()
-
-
-    # generate best fit line
-    x = np.linspace(np.min(force), np.max(force), 100)
-    y = model.params[0] + model.params[1]*x
-    p = sns.jointplot(x=force, y=gex)
-    p.ax_joint.plot(x, y, 'r-')
-    p.set_axis_labels(f'log {force_metric}', gene)
-
-    plt.savefig(file, bbox_inches='tight')
-
