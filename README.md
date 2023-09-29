@@ -28,7 +28,7 @@ Adrien Hallou, Ruiyang He, Benjamin David Simons and Bianca Dumitrascu. A comput
 First, clone the TensionMap repository to your local machine, where `<tensionmap_dir>` is a directory of your choice:
 
 ```
-git clone --branch TensionMap-new https://github.com/Computational-Morphogenomics-Group/TensionMap.git <tensionmap_dir>
+git clone https://github.com/Computational-Morphogenomics-Group/TensionMap.git <tensionmap_dir>
 ```
 
 The requirements to run TensionMap alone can be found in `tensionmap-minimal.yml`. Create a conda environment with the required dependencies using:
