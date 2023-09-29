@@ -77,11 +77,13 @@ Note that you may need to use `python3` instead of `python` if you have both Pyt
 #### Basic tutorial
 [Running pipeline on synthetic image and basic analysis](notebooks/synthetic_image.ipynb) <br />
 
-#### Reproducing further mechano-transcriptomics analysis from the manuscript 
+#### Reproducing further mechano-transcriptomics analysis from the manuscript
+[Run TensionMap on mouse embryo seqFISH data](notebooks/00_run_tensionmap.ipynb) <br />
 [Characterising mechanical properties of tissue boundaries](notebooks/01_biophysical_analysis.ipynb) <br />
+[Analyse imputed whole-transcriptome single-cell expression data](notebooks/02_sc_analysis.ipynb) <br />
 [Identifying putative ligand-receptor signalling across boundaries](notebooks/03_lr_analysis.ipynb) <br />
-[Testing for associations between gene expression and cellular mechanics using a spatial regression model](notebooks/05_spatial_regression.ipynb) <br />
 [Identifying nonlinear association patterns between gene expression and cellular mechanics](notebooks/04_nonlinear_schot.ipynb) <br />
+[Testing for associations between gene expression and cellular mechanics using a spatial regression model](notebooks/05_spatial_regression.ipynb) <br />
 
 ## Quickstart
 

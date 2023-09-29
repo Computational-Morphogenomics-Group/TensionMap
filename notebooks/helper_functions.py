@@ -108,7 +108,7 @@ def tension_lineplot(boundary_tensions, boundary_celltypes, xlim=None):
     tensions_summary['ci95_hi'] = tensions_summary['mean'] + 1.96*tensions_summary['sem']
     tensions_summary['ci95_lo'] = tensions_summary['mean'] - 1.96*tensions_summary['sem']
     ax.plot(tensions_summary.index.values, tensions_summary['mean'], 'k-')
-    ax.fill_between(tensions_summary.index.values, tensions_summary['ci95_lo'], tensions_summary['ci95_hi'], alpha=0.5, color='r')
+    ax.fill_between(tensions_summary.index.values, tensions_summary['ci95_lo'].astype(float), tensions_summary['ci95_hi'].astype(float), alpha=0.5, color='r')
 
     ax.vlines(0, 0, 1000)
     ax.set_ylim((0.9*np.min(tensions_summary['ci95_lo']),1.1*np.max(tensions_summary['ci95_hi'])))
@@ -156,7 +156,7 @@ def tension_gex_lineplot(boundary_tensions, boundary_celltypes, marker_genes, ge
         tensions_summary['lower_bound'] = tensions_summary['mean'] - tensions_summary['sem']
 
     ax.plot(tensions_summary.index.values, tensions_summary['mean'], 'k-')
-    ax.fill_between(tensions_summary.index.values, tensions_summary['lower_bound'], tensions_summary['upper_bound'], alpha=0.5, color='r')
+    ax.fill_between(tensions_summary.index.values, tensions_summary['lower_bound'].astype(float), tensions_summary['upper_bound'].astype(float), alpha=0.5, color='r')
 
     # extract expression data and normalise
     expression = gex_res.loc[marker_genes].values
@@ -210,6 +210,8 @@ def tension_gex_lineplot(boundary_tensions, boundary_celltypes, marker_genes, ge
     ax.set_xticklabels(new_labels)
     ax1.legend(handles=[mpatches.Patch(color=colors[0], label=marker_genes[0]),
                         mpatches.Patch(color=colors[1], label=marker_genes[1])])
+    ax.grid(False)
+    ax1.grid(False)
     plt.close(fig)
     return fig
 
@@ -257,6 +259,11 @@ def gex_lineplot(gene, tensionmap_res, boundary_celltypes, distance_to_boundary,
     ax.set_xticklabels([])
     ax.set_yticklabels([])
     ax.tick_params(bottom = False)
+
+    ax.grid(False)
+    ax1.grid(False)
+    ax2.grid(False)
+
     plt.subplots_adjust(wspace=0, hspace=0)
     plt.show()
     return
