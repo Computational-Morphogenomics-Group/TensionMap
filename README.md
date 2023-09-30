@@ -25,13 +25,13 @@ Adrien Hallou, Ruiyang He, Benjamin David Simons and Bianca Dumitrascu. A comput
 
 ## Installation
 
-First, clone the TensionMap repository to your local machine, where `<tensionmap_dir>` is a directory of your choice:
+First, clone the main branch of the TensionMap repository to your local machine, where `<tensionmap_local_dir>` is a directory of your choice:
 
 ```
-git clone https://github.com/Computational-Morphogenomics-Group/TensionMap.git <tensionmap_dir>
+git clone https://github.com/Computational-Morphogenomics-Group/TensionMap.git <tensionmap_local_dir>
 ```
 
-The requirements to run TensionMap alone can be found in `tensionmap-minimal.yml`. Create a conda environment with the required dependencies using:
+The requirements to run TensionMap for image-based force inference alone can be found in `tensionmap-minimal.yml`. Create a conda environment with the required dependencies using:
 
 ```
 conda env create -f tensionmap-minimal.yml -n tensionmap
@@ -50,7 +50,7 @@ from src.VMSI import *
 
 ### Optional: Matlab `fmincon` optimiser
 
-TensionMap can use optimisers from the Python implementation of the `NLopt` library or Matlab's `fmincon`. To enable `fmincon` for TensionMap, a licensed installation of Matlab is needed, and the Matlab Engine API for Python must be installed. Full instructions can be found [here](https://mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html).
+TensionMap can use optimisers from the Python implementation of the `NLopt` and 'Cyipopt' libraries or Matlab's `fmincon`. To enable `fmincon` for TensionMap, a licensed installation of Matlab is needed, and the Matlab Engine API for Python must be installed. Full instructions can be found [here](https://mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html).
 
 To install the Matlab Engine API, first identify the folder where Matlab is installed. This can be found by opening Matlab and typing `matlabroot` into the console. 
 
@@ -87,7 +87,7 @@ Note that you may need to use `python3` instead of `python` if you have both Pyt
 
 ## Quickstart
 
-To run TensionMap on a segmented image, use the workflow below:
+To run TensionMap on the instance segmentation mask of a tissue image, use the workflow below:
 
 Load required packages and add TensionMap to sys.path, where `'tensionmap_path'` is where TensionMap was downloaded:
 
@@ -99,35 +99,35 @@ import skimage
 from skimage import io
 ```
 
-First, load the image:
+First, load the instance segmentation mask of the tissue image:
 
 ```
-img = skimage.io.imread('img_path')
+img_mask = skimage.io.imread('img_mask_path')
 ```
 
 If boundaries between cells are not delineated (i.e. cell labels are touching), find cell boundaries:
 
 ```
-img = skimage.segmentation.find_boundaries(img, mode='subpixel')
-img = skimage.measure.label(1-img)
+img_mask = skimage.segmentation.find_boundaries(img, mode='subpixel')
+img_mask = skimage.measure.label(1-img_mask)
 ```
 
-Next, run the force inference and morphometrics:
+Next, run the image-based force inference algorithm and cell morphometrics analysis:
 
 ```
-vmsi_model = run_VMSI(img)
+vmsi_model = run_VMSI(img_mask)
 ```
 
-Results from the resulting model can be plotted using the `plot()` method, or output as a Pandas dataframe or .csv file using the `output_results()` method:
+Results can be plotted using the `plot()` method, or output as a Pandas dataframe or .csv file using the `output_results()` method:
 
 ```
-vmsi_model.plot(['tension','pressure', 'stress'], img)
+vmsi_model.plot(['tension','pressure', 'stress'], img_mask)
 results = vmsi_model.output_results()
 ```
 
 ## Notes and frequently encountered issues
 
-- Inference is dependent on a high-quality segmentation; a common issue that can result in errors is segmentation artifacts resulting from manual segmentations. 
+- Inference is dependent on a high-quality segmentation; a common issue that can result in errors is segmentation artifacts resulting from manual segmentations or poor quality automated segmentation. 
 
 - Image tiling may lead to unexpected results and is not recommended for images which exhibit significant spatial anisotropy in cell morphology.
 
