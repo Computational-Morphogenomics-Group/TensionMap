@@ -127,7 +127,36 @@ results = vmsi_model.output_results()
 
 ## Notes and frequently encountered issues
 
-- Inference is dependent on a high-quality segmentation; a common issue that can result in errors is segmentation artifacts resulting from manual segmentations or poor quality automated segmentation. 
+- Inference is dependent on a high-quality segmentation; a common issue that can result in errors is segmentation artifacts resulting from manual segmentations or poor quality automated segmentation.
+  - The segmentation processing workflow is particularly sensitive to small imperfections in the segmentation mask, for example small labelled regions that are not 4-connected with the rest of the label that may arise after manual segmentation. To correct for these issues, use the code below:
+```
+    # Here 'img' is your input segmentation mask
+    
+    # Check if we have disconnected regions that are too small
+    labels = skimage.measure.label(img, connectivity=1)
+    areas = pd.DataFrame(skimage.measure.regionprops_table(label_image=labels, properties=('label','area')))
+
+    # Change '10' to some reasonable number of pixels below which we are certain isolated regions are artifacts
+    min_size = 10
+    if any(areas['area'] < min_size):
+        # Save image exterior
+        img_exterior = img==0
+        
+        # Remove holes
+        
+        # 1: set labels that correspond to isolated regions to 0
+        img[np.isin(labels, areas['label'].values[areas['area'] < min_size])] = 0
+        
+        # 2: expand labels to fill holes
+        img = skimage.segmentation.expand_labels(img, distance=5)
+        
+        # 3: set original image exterior back to 0
+        img[img_exterior] = 0
+        
+        # 4: relabel image to make sure labels range from 1 to num_labels
+        img = skimage.measure.label(img)
+```
+    
 
 - Image tiling may lead to unexpected results and is not recommended for images which exhibit significant spatial anisotropy in cell morphology.
 
